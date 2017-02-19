@@ -2,6 +2,8 @@ from collections import defaultdict
 import logging
 from threading import Thread
 
+import dask.dataframe as dd
+import dask.array as da
 import numpy as np
 import pandas as pd
 from toolz import first
@@ -145,6 +147,26 @@ def train(client, params, data, labels, **kwargs):
     <xgboost.core.Booster object at ...>
     """
     return sync(client.loop, _train, client, params, data, labels, **kwargs)
+
+
+def _predict_part(part, model=None):
+    xgb.rabit.init()
+    dm = xgb.DMatrix(part)
+    result = model.predict(dm)
+    xgb.rabit.finalize()
+    if isinstance(part, pd.DataFrame):
+        result = pd.Series(result, index=part.index, name='predictions')
+    return result
+
+
+def predict(client, model, data):
+    if isinstance(data, dd._Frame):
+        result = data.map_partitions(_predict_part, model=model)
+    elif isinstance(data, da.Array):
+        reuslt = data.map_blocks(_predict_part, model=model)
+
+    return result
+
 
 
 """

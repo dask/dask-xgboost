@@ -1,8 +1,9 @@
 import pandas as pd
+from tornado import gen
 import xgboost as xgb
 
 import dask.dataframe as dd
-from distributed import Client
+from distributed import Client, Nanny
 from distributed.utils_test import gen_cluster, loop, cluster
 
 import dask_xgboost as dxgb
@@ -14,14 +15,15 @@ labels = pd.Series([1, 0, 1, 0, 1, 0, 1, 1, 1, 1])
 param = {'max_depth': 2, 'eta': 1, 'silent': 1, 'objective': 'binary:logistic'}
 
 
-@gen_cluster(client=True)
-def test_dask(c, s, a, b):
+@gen_cluster(client=True, timeout=None)
+def test_basic(c, s, a, b):
     dtrain = xgb.DMatrix(df, label=labels)
     bst = xgb.train(param, dtrain)
 
     ddf = dd.from_pandas(df, npartitions=4)
     dlabels = dd.from_pandas(labels, npartitions=4)
     dbst = yield dxgb._train(c, param, ddf, dlabels)
+    dbst = yield dxgb._train(c, param, ddf, dlabels)  # we can do this twice
 
     result = bst.predict(dtrain)
     dresult = dbst.predict(dtrain)
@@ -29,6 +31,13 @@ def test_dask(c, s, a, b):
     correct = (result > 0.5) == labels
     dcorrect = (dresult > 0.5) == labels
     assert dcorrect.sum() >= correct.sum()
+
+    predictions = dxgb.predict(c, dbst, ddf)
+    assert isinstance(predictions, dd.Series)
+    predictions = yield c.compute(predictions)._result()
+    assert isinstance(predictions, pd.Series)
+
+    assert ((predictions > 0.5) != labels).sum() < 2
 
 
 def test_synchronous_api(loop):

@@ -91,7 +91,7 @@ def _train(client, params, data, labels, **kwargs):
         assert data_parts.shape[1] == 1
         data_parts = data_parts.flatten().tolist()
     if isinstance(label_parts, np.ndarray):
-        assert label_parts.shape[1] == 1
+        assert label_parts.ndim == 1 or label_parts.shape[1] == 1
         label_parts = label_parts.flatten().tolist()
 
     # Arrange parts into pairs.  This enforces co-locality
@@ -168,6 +168,7 @@ def predict(client, model, data):
     if isinstance(data, dd._Frame):
         result = data.map_partitions(_predict_part, model=model)
     elif isinstance(data, da.Array):
-        reuslt = data.map_blocks(_predict_part, model=model)
+        result = data.map_blocks(_predict_part, model=model, dtype=float,
+                                 drop_axis=1)
 
     return result

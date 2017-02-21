@@ -1,1 +1,1 @@
-from .core import _train, train, predict, predict
+from .core import _train, train, predict

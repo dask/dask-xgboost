@@ -61,15 +61,17 @@ def train_part(env, param, list_of_parts, **kwargs):
 
     args = [('%s=%s' % item).encode() for item in env.items()]
     xgb.rabit.init(args)
-    logger.info("Starting Rabit, Rank %d", xgb.rabit.get_rank())
+    try:
+        logger.info("Starting Rabit, Rank %d", xgb.rabit.get_rank())
 
-    bst = xgb.train(param, dtrain, **kwargs)
+        bst = xgb.train(param, dtrain, **kwargs)
 
-    if xgb.rabit.get_rank() == 0:  # Only return from one worker
-        result = bst
-    else:
-        result = None
-    xgb.rabit.finalize()
+        if xgb.rabit.get_rank() == 0:  # Only return from one worker
+            result = bst
+        else:
+            result = None
+    finally:
+        xgb.rabit.finalize()
     return result
 
 
@@ -169,13 +171,3 @@ def predict(client, model, data):
         reuslt = data.map_blocks(_predict_part, model=model)
 
     return result
-
-
-
-"""
-TODO
-====
-
--   Pass keywords directly to rabit.init rather than use environment variables
-    (current approach fails if multiple workers are in the same process)
-"""

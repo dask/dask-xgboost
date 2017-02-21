@@ -6,7 +6,7 @@ import dask.dataframe as dd
 import dask.array as da
 import numpy as np
 import pandas as pd
-from toolz import first
+from toolz import first, assoc
 from tornado import gen
 from dask import delayed
 from distributed.client import _wait
@@ -104,6 +104,8 @@ def _train(client, params, data, labels, **kwargs):
     for key, workers in who_has.items():
         worker_map[first(workers)].append(key)
 
+    ncores = yield client.scheduler.ncores()  # Number of cores per worker
+
     # Start the XGBoost tracker on the Dask scheduler
     host, port = parse_host_port(client.scheduler.address)
     env = yield client._run_on_scheduler(start_tracker,
@@ -111,8 +113,9 @@ def _train(client, params, data, labels, **kwargs):
                                          len(worker_map))
 
     # Tell each worker to train on the chunks/parts that it has locally
-    futures = [client.submit(train_part, env, params, list_of_parts,
-                             workers=worker, **kwargs)
+    futures = [client.submit(train_part, env,
+                             assoc(params, 'nthreads', ncores[worker]),
+                             list_of_parts, workers=worker, **kwargs)
                for worker, list_of_parts in worker_map.items()]
 
     # Get the results, only one will be non-None

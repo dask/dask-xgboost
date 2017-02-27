@@ -19,10 +19,11 @@ for r in requires:
         install_requires.append(r)
 
 setup(name='dask-xgboost',
-      version='0.0.1',
+      version='0.1.0',
       description='Interactions between Dask and XGBoost',
       maintainer='Matthew Rocklin',
-      maintainer_email='mrocklin@gmail.com',
+      maintainer_email='mrocklin@continuum.io',
+      url='https://github.com/dask/dask-xgboost',
       license='BSD',
       install_requires=install_requires,
       extras_require=extras_require,

@@ -11,15 +11,19 @@ from tornado import gen
 from dask import delayed
 from distributed.client import _wait
 from distributed.utils import sync
-try:
-    from distributed.comm.core import parse_host_port
-except ImportError:  # this import moved between versions
-    from distributed.comm.addressing import parse_host_port
 import xgboost as xgb
 
 from .tracker import RabitTracker
 
 logger = logging.getLogger(__name__)
+
+
+def parse_host_port(address):
+    if '://' in address:
+        address = address.rsplit('://', 1)[1]
+    host, port = address.split(':')
+    port = int(port)
+    return host, port
 
 
 def start_tracker(host, n_workers):
@@ -153,6 +157,10 @@ def train(client, params, data, labels, **kwargs):
     >>> del data['outcome']  # doctest: +SKIP
     >>> train(client, params, data, labels, **normal_kwargs)  # doctest: +SKIP
     <xgboost.core.Booster object at ...>
+
+    See Also
+    --------
+    predict
     """
     return sync(client.loop, _train, client, params, data, labels, **kwargs)
 
@@ -168,6 +176,31 @@ def _predict_part(part, model=None):
 
 
 def predict(client, model, data):
+    """ Distributed prediction with XGBoost
+
+    Parameters
+    ----------
+    client: dask.distributed.Client
+    model: xgboost.Booster
+    data: dask array or dataframe
+
+    Examples
+    --------
+    >>> client = Client('scheduler-address:8786')  # doctest: +SKIP
+    >>> test_data = dd.read_csv('s3://...')  # doctest: +SKIP
+    >>> model
+    <xgboost.core.Booster object at ...>
+
+    >>> predictions = predict(client, model, test_data)  # doctest: +SKIP
+
+    Returns
+    -------
+    Dask.dataframe or dask.array, depending on the input data type
+
+    See Also
+    --------
+    train
+    """
     if isinstance(data, dd._Frame):
         result = data.map_partitions(_predict_part, model=model)
     elif isinstance(data, da.Array):

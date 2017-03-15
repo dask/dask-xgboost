@@ -130,7 +130,7 @@ def _train(client, params, data, labels, **kwargs):
     # Get the results, only one will be non-None
     results = yield client._gather(futures)
     result = [v for v in results if v][0]
-    return result
+    raise gen.Return(result)
 
 
 def train(client, params, data, labels, **kwargs):

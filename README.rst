@@ -53,6 +53,7 @@ Larger Example
 
 For a more serious example see
 
+-  `This blogpost <http://matthewrocklin.com/blog/work/2017/03/28/dask-xgboost>`_
 -  `This notebook <https://gist.github.com/mrocklin/19c89d78e34437e061876a9872f4d2df>`_
 -  `This screencast <https://youtu.be/Cc4E-PdDSro>`_
 

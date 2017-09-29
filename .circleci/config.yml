@@ -1,0 +1,8 @@
+version: 2
+jobs:
+    build:
+        docker:
+            - image: circleci/python:latest
+        steps:
+            - checkout
+            - run: ./ci/install-circle.sh

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "[install-travis]"
+echo "[install-cirle]"
 
 # install iniconda
 MINICONDA_DIR="$HOME/miniconda3"

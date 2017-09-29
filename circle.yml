@@ -1,0 +1,14 @@
+machine:
+  environment:
+    # these are globally set
+    MINICONDA_DIR: /home/ubuntu/miniconda3
+
+
+dependencies:
+  override:
+    ./ci/install-circle.sh
+
+test:
+  override:
+      - case $CIRCLE_NODE_INDEX in 0) ./ci/run_circle.sh --skip-slow --skip-network ;; 1) ./ci/run_circle.sh --only-slow --skip-network ;; 2) ./ci/run_circle.sh --skip-slow --skip-network ;; 3) ./ci/run_circle.sh --skip-slow --skip-network ;; esac:
+          parallel: true

@@ -108,10 +108,11 @@ def _train(client, params, data, labels, **kwargs):
 
     # Because XGBoost-python doesn't yet allow iterative training, we need to
     # find the locations of all chunks and map them to particular Dask workers
+    key_to_part_dict = dict([(part.key, part) for part in parts])
     who_has = yield client.scheduler.who_has(keys=[part.key for part in parts])
     worker_map = defaultdict(list)
     for key, workers in who_has.items():
-        worker_map[first(workers)].append(key)
+        worker_map[first(workers)].append(key_to_part_dict[key])
 
     ncores = yield client.scheduler.ncores()  # Number of cores per worker
 

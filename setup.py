@@ -2,15 +2,14 @@
 
 import os
 from setuptools import setup
-import sys
 
 requires = open('requirements.txt').read().strip().split('\n')
 install_requires = []
 extras_require = {}
 for r in requires:
     if ';' in r:
-        # requirements.txt conditional dependencies need to be reformatted for wheels
-        # to the form: `'[extra_name]:condition' : ['requirements']`
+        # requirements.txt conditional dependencies need to be reformatted for
+        # wheels to the form: `'[extra_name]:condition' : ['requirements']`
         req, cond = r.split(';', 1)
         cond = ':' + cond
         cond_reqs = extras_require.setdefault(cond, [])
@@ -28,6 +27,7 @@ setup(name='dask-xgboost',
       install_requires=install_requires,
       extras_require=extras_require,
       packages=['dask_xgboost'],
-      long_description=(open('README.rst').read() if os.path.exists('README.rst')
+      long_description=(open('README.rst').read()
+                        if os.path.exists('README.rst')
                         else ''),
       zip_safe=False)

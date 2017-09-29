@@ -1,12 +1,11 @@
 import numpy as np
 import pandas as pd
-from tornado import gen
 import xgboost as xgb
 
 import dask.array as da
 import dask.dataframe as dd
-from distributed import Client, Nanny
-from distributed.utils_test import gen_cluster, loop, cluster
+from distributed import Client
+from distributed.utils_test import gen_cluster, loop, cluster  # noqa
 
 import dask_xgboost as dxgb
 
@@ -70,7 +69,7 @@ def test_numpy(c, s, a, b):
     assert ((predictions > 0.5) != labels).sum() < 2
 
 
-def test_synchronous_api(loop):
+def test_synchronous_api(loop):  # noqa
     dtrain = xgb.DMatrix(df, label=labels)
     bst = xgb.train(param, dtrain)
 

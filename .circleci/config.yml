@@ -16,15 +16,15 @@ jobs:
             conda config --add channels conda-forge
             conda create -q -n test-environment python=${PYTHON}
             source activate test-environment
-            conda install coverage flake8 pytest pytest-cov numpy pandas xgboost dask distributed
+            conda install -q coverage flake8 pytest pytest-cov numpy pandas xgboost dask distributed scikit-learn
             pip install -e .
             conda list test-environment
 
       - run:
           command: |
             source activate test-environment
-            pytest dask-xgboost
+            pytest dask_xgboost
       - run:
           command: |
             source activate test-environment
-            flake8 dask-xgboost
+            flake8 dask_xgboost

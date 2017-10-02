@@ -4,7 +4,7 @@ jobs:
     docker:
       - image: continuumio/miniconda:latest
     environment:
-      PYTHON: 2.7
+      PYTHON: "3.6"
     steps:
       - checkout
       - run:
@@ -14,7 +14,7 @@ jobs:
             conda update -q conda
             conda install conda-build anaconda-client --yes
             conda config --add channels conda-forge
-            conda create -q -n test-environment python==${PYTHON}
+            conda create -q -n test-environment python=${PYTHON}
             source activate test-environment
             conda install coverage flake8 pytest pytest-cov numpy pandas xgboost dask distributed
             pip install -e .

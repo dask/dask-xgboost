@@ -46,13 +46,14 @@ def test_basic(c, s, a, b):
 
 @gen_cluster(client=True, timeout=None)
 def test_numpy(c, s, a, b):
-    dtrain = xgb.DMatrix(X, label=y)
-    bst = xgb.train(param, dtrain)
-
+    xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2))
     dy = da.from_array(y, chunks=(2,))
     dbst = yield dxgb._train(c, param, dX, dy)
     dbst = yield dxgb._train(c, param, dX, dy)  # we can do this twice
+
+    dtrain = xgb.DMatrix(X, label=y)
+    bst = xgb.train(param, dtrain)
 
     result = bst.predict(dtrain)
     dresult = dbst.predict(dtrain)

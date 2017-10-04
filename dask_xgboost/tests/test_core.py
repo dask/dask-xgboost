@@ -1,12 +1,11 @@
 import numpy as np
 import pandas as pd
-from tornado import gen
 import xgboost as xgb
 
 import dask.array as da
 import dask.dataframe as dd
-from distributed import Client, Nanny
-from distributed.utils_test import gen_cluster, loop, cluster
+from distributed import Client
+from distributed.utils_test import gen_cluster, loop, cluster  # noqa
 
 import dask_xgboost as dxgb
 
@@ -47,13 +46,14 @@ def test_basic(c, s, a, b):
 
 @gen_cluster(client=True, timeout=None)
 def test_numpy(c, s, a, b):
-    dtrain = xgb.DMatrix(X, label=y)
-    bst = xgb.train(param, dtrain)
-
+    xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2))
     dy = da.from_array(y, chunks=(2,))
     dbst = yield dxgb._train(c, param, dX, dy)
     dbst = yield dxgb._train(c, param, dX, dy)  # we can do this twice
+
+    dtrain = xgb.DMatrix(X, label=y)
+    bst = xgb.train(param, dtrain)
 
     result = bst.predict(dtrain)
     dresult = dbst.predict(dtrain)
@@ -70,7 +70,7 @@ def test_numpy(c, s, a, b):
     assert ((predictions > 0.5) != labels).sum() < 2
 
 
-def test_synchronous_api(loop):
+def test_synchronous_api(loop):  # noqa
     dtrain = xgb.DMatrix(df, label=labels)
     bst = xgb.train(param, dtrain)
 

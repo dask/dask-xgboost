@@ -1,0 +1,34 @@
+version: 2
+jobs:
+  build:
+    docker:
+      - image: continuumio/miniconda:latest
+    environment:
+      PYTHON: "3.6"
+    steps:
+      - checkout
+      - run:
+          name: configure conda
+          command: |
+            conda config --set always_yes true --set changeps1 false
+            conda update -q conda
+            conda install conda-build anaconda-client --yes
+            conda config --add channels conda-forge
+            conda create -q -n test-environment python=${PYTHON}
+            source activate test-environment
+            conda install -q coverage flake8 pytest pytest-cov numpy pandas xgboost dask distributed scikit-learn
+            pip install -e .
+            conda list test-environment
+      - run:
+          # TODO: Check on the conda-forge recipe for why this is nescessary
+          command: |
+            source activate test-environment
+            ln -s /opt/conda/lib/libgomp.so.1 ${CONDA_PREFIX}/lib/
+      - run:
+          command: |
+            source activate test-environment
+            pytest dask_xgboost
+      - run:
+          command: |
+            source activate test-environment
+            flake8 dask_xgboost

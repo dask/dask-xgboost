@@ -17,7 +17,8 @@ https://github.com/dmlc/dmlc-core/blob/master/LICENSE
 
 No code modified or added except for this explanatory comment.
 """
-# pylint: disable=invalid-name, missing-docstring, too-many-arguments, too-many-locals
+# pylint: disable=invalid-name, missing-docstring, too-many-arguments
+# pylint: disable=too-many-locals
 # pylint: disable=too-many-branches, too-many-statements
 from __future__ import absolute_import
 
@@ -31,12 +32,14 @@ import time
 import logging
 from threading import Thread
 
+
 class ExSocket(object):
     """
     Extension of socket to handle recv and send of special data
     """
     def __init__(self, sock):
         self.sock = sock
+
     def recvall(self, nbytes):
         res = []
         nread = 0
@@ -45,25 +48,33 @@ class ExSocket(object):
             nread += len(chunk)
             res.append(chunk)
         return b''.join(res)
+
     def recvint(self):
         return struct.unpack('@i', self.recvall(4))[0]
+
     def sendint(self, n):
         self.sock.sendall(struct.pack('@i', n))
+
     def sendstr(self, s):
         self.sendint(len(s))
         self.sock.sendall(s.encode())
+
     def recvstr(self):
         slen = self.recvint()
         return self.recvall(slen).decode()
 
+
 # magic number used to verify existence of data
 kMagic = 0xff99
+
 
 def get_some_ip(host):
     return socket.getaddrinfo(host, None)[0][4][0]
 
+
 def get_family(addr):
     return socket.getaddrinfo(addr, None)[0][0]
+
 
 class SlaveEntry(object):
     def __init__(self, sock, s_addr):
@@ -71,7 +82,8 @@ class SlaveEntry(object):
         self.sock = slave
         self.host = get_some_ip(s_addr[0])
         magic = slave.recvint()
-        assert magic == kMagic, 'invalid magic number=%d from %s' % (magic, self.host)
+        assert magic == kMagic, 'invalid magic number=%d from %s' % (
+            magic, self.host)
         slave.sendint(kMagic)
         self.rank = slave.recvint()
         self.world_size = slave.recvint()
@@ -143,6 +155,7 @@ class SlaveEntry(object):
                 wait_conn.pop(r, None)
             self.wait_accept = len(badset) - len(conset)
             return rmset
+
 
 class RabitTracker(object):
     """
@@ -241,7 +254,7 @@ class RabitTracker(object):
         """
         tree_map, parent_map = self.get_tree(nslave)
         ring_map = self.get_ring(tree_map, parent_map)
-        rmap = {0 : 0}
+        rmap = {0: 0}
         k = 0
         for i in range(nslave - 1):
             k = ring_map[k][1]
@@ -311,13 +324,15 @@ class RabitTracker(object):
                         rank = todo_nodes.pop(0)
                         if s.jobid != 'NULL':
                             job_map[s.jobid] = rank
-                        s.assign_rank(rank, wait_conn, tree_map, parent_map, ring_map)
+                        s.assign_rank(rank, wait_conn, tree_map, parent_map,
+                                      ring_map)
                         if s.wait_accept > 0:
                             wait_conn[rank] = s
-                        logging.debug('Recieve %s signal from %s; assign rank %d',
-                                      s.cmd, s.host, s.rank)
+                        logging.debug('Recieve %s signal from %s; '
+                                      'assign rank %d', s.cmd, s.host, s.rank)
                 if len(todo_nodes) == 0:
-                    logging.info('@tracker All of %d nodes getting started', nslave)
+                    logging.info('@tracker All of %d nodes getting started',
+                                 nslave)
                     self.start_time = time.time()
             else:
                 s.assign_rank(rank, wait_conn, tree_map, parent_map, ring_map)
@@ -339,6 +354,7 @@ class RabitTracker(object):
     def join(self):
         while self.thread.isAlive():
             self.thread.join(100)
+
 
 class PSTracker(object):
     """
@@ -370,7 +386,8 @@ class PSTracker(object):
         for k, v in envs.items():
             env[k] = str(v)
         self.thread = Thread(
-            target=(lambda: subprocess.check_call(self.cmd, env=env, shell=True)), args=())
+            target=(lambda: subprocess.check_call(self.cmd, env=env,
+                                                  shell=True)), args=())
         self.thread.setDaemon(True)
         self.thread.start()
 
@@ -398,7 +415,8 @@ def get_host_ip(hostIP=None):
         try:
             hostIP = socket.gethostbyname(socket.getfqdn())
         except gaierror:
-            logging.warn('gethostbyname(socket.getfqdn()) failed... trying on hostname()')
+            logging.warn('gethostbyname(socket.getfqdn()) failed... trying on '
+                         'hostname()')
             hostIP = socket.gethostbyname(socket.gethostname())
         if hostIP.startswith("127."):
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -412,8 +430,8 @@ def submit(nworker, nserver, fun_submit, hostIP='auto', pscmd=None):
     if nserver == 0:
         pscmd = None
 
-    envs = {'DMLC_NUM_WORKER' : nworker,
-            'DMLC_NUM_SERVER' : nserver}
+    envs = {'DMLC_NUM_WORKER': nworker,
+            'DMLC_NUM_SERVER': nserver}
     hostIP = get_host_ip(hostIP)
 
     if nserver == 0:
@@ -430,6 +448,7 @@ def submit(nworker, nserver, fun_submit, hostIP='auto', pscmd=None):
     else:
         pserver.join()
 
+
 def start_rabit_tracker(args):
     """Standalone function to start rabit tracker.
 
@@ -437,9 +456,10 @@ def start_rabit_tracker(args):
     ----------
     args: arguments to start the rabit tracker.
     """
-    envs = {'DMLC_NUM_WORKER' : args.num_workers,
-            'DMLC_NUM_SERVER' : args.num_servers}
-    rabit = RabitTracker(hostIP=get_host_ip(args.host_ip), nslave=args.num_workers)
+    envs = {'DMLC_NUM_WORKER': args.num_workers,
+            'DMLC_NUM_SERVER': args.num_servers}
+    rabit = RabitTracker(hostIP=get_host_ip(args.host_ip),
+                         nslave=args.num_workers)
     envs.update(rabit.slave_envs())
     rabit.start(args.num_workers)
     sys.stdout.write('DMLC_TRACKER_ENV_START\n')
@@ -457,10 +477,12 @@ def main():
     parser.add_argument('--num-workers', required=True, type=int,
                         help='Number of worker proccess to be launched.')
     parser.add_argument('--num-servers', default=0, type=int,
-                        help='Number of server process to be launched. Only used in PS jobs.')
+                        help='Number of server process to be launched. Only '
+                             'used in PS jobs.')
     parser.add_argument('--host-ip', default=None, type=str,
                         help=('Host IP addressed, this is only needed ' +
-                              'if the host IP cannot be automatically guessed.'))
+                              'if the host IP cannot be automatically guessed.'
+                              ))
     parser.add_argument('--log-level', default='INFO', type=str,
                         choices=['INFO', 'DEBUG'],
                         help='Logging level of the logger.')
@@ -479,7 +501,9 @@ def main():
     if args.num_servers == 0:
         start_rabit_tracker(args)
     else:
-        raise RuntimeError("Do not yet support start ps tracker in standalone mode.")
+        raise RuntimeError("Do not yet support start ps tracker in standalone "
+                           "mode.")
+
 
 if __name__ == "__main__":
     main()

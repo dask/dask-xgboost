@@ -9,7 +9,8 @@ import pandas as pd
 from toolz import first, assoc
 from tornado import gen
 from dask import delayed
-from distributed.client import _wait
+from distributed import Client
+from distributed.client import _wait, default_client
 from distributed.utils import sync
 import xgboost as xgb
 
@@ -64,7 +65,8 @@ def train_part(env, param, list_of_parts, **kwargs):
     data, labels = zip(*list_of_parts)  # Prepare data
     data = concat(data)                 # Concatenate many parts into one
     labels = concat(labels)
-    dtrain = xgb.DMatrix(data, labels)  # Convert to xgboost data structure
+    feature_names = getattr(data, 'columns', None)
+    dtrain = xgb.DMatrix(data, labels, feature_names=feature_names)
 
     args = [('%s=%s' % item).encode() for item in env.items()]
     xgb.rabit.init(args)
@@ -209,3 +211,79 @@ def predict(client, model, data):
                                  drop_axis=1)
 
     return result
+
+
+class XGBRegressor:
+    def __init__(self, max_depth=3, learning_rate=0.1, n_estimators=100,
+                 silent=True, objective='reg:linear', nthread=-1, gamma=0,
+                 min_child_weight=1, max_delta_step=0, subsample=1,
+                 colsample_bytree=1, colsample_bylevel=1, reg_alpha=0,
+                 reg_lambda=1, scale_pos_weight=1, base_score=0.5, seed=0,
+                 missing=None, scheduler_address=None):
+        self.scheduler_address = scheduler_address
+        super().__init__(
+            max_depth=max_depth,
+            learning_rate=learning_rate,
+            n_estimators=n_estimators,
+            silent=silent,
+            objective=objective,
+            nthread=nthread,
+            gamma=gamma,
+            min_child_weight=min_child_weight,
+            max_delta_step=max_delta_step,
+            subsample=subsample,
+            colsample_bytree=colsample_bytree,
+            colsample_bylevel=colsample_bylevel,
+            reg_alpha=reg_alpha,
+            reg_lambda=reg_lambda,
+            scale_pos_weight=scale_pos_weight,
+            base_score=base_score,
+            seed=seed,
+            missing=missing,
+            scheduler_address=scheduler_address)
+
+    def fit(self, X, y=None):
+        client = Client(self.scheduler_address)
+        params = self.get_params()
+        client = Client(params.pop('scheduler_address'))
+
+        train(client, params, X, y)
+
+
+class XGBClassifier(xgb.XGBClassifier):
+    def __init__(self, max_depth=3, learning_rate=0.1, n_estimators=100,
+                 silent=True, objective='binary:logistic', nthread=-1, gamma=0,
+                 min_child_weight=1, max_delta_step=0, subsample=1,
+                 colsample_bytree=1, colsample_bylevel=1, reg_alpha=0,
+                 reg_lambda=1, scale_pos_weight=1, base_score=0.5, seed=0,
+                 missing=None):
+        super().__init__(
+            base_score=base_score,
+            colsample_bylevel=colsample_bylevel,
+            colsample_bytree=colsample_bytree,
+            gamma=gamma,
+            learning_rate=learning_rate,
+            max_delta_step=max_delta_step,
+            max_depth=max_depth,
+            min_child_weight=min_child_weight,
+            missing=missing,
+            n_estimators=n_estimators,
+            nthread=nthread,
+            objective=objective,
+            reg_alpha=reg_alpha,
+            reg_lambda=reg_lambda,
+            scale_pos_weight=scale_pos_weight,
+            seed=seed,
+            silent=silent)
+
+    def fit(self, X, y=None):
+        client = default_client()
+
+        xgb_options = self.get_xgb_params()
+        self._Booster = train(client, xgb_options, X, y,
+                              num_boost_round=self.n_estimators)
+        return self
+
+    def predict(self, X):
+        client = default_client()
+        return predict(client, self._Booster, X)

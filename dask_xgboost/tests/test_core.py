@@ -3,6 +3,7 @@ import pandas as pd
 import xgboost as xgb
 
 import dask.array as da
+from dask.array.utils import assert_eq
 import dask.dataframe as dd
 from distributed import Client
 from distributed.utils_test import gen_cluster, loop, cluster  # noqa
@@ -17,6 +18,36 @@ param = {'max_depth': 2, 'eta': 1, 'silent': 1, 'objective': 'binary:logistic'}
 
 X = df.values
 y = labels.values
+
+
+def test_classifier(loop):  # noqa
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop):
+            a = dxgb.XGBClassifier()
+            X2 = da.from_array(X, 5)
+            y2 = da.from_array(y, 5)
+            a.fit(X2, y2)
+            p1 = a.predict(X2)
+
+    b = xgb.XGBClassifier()
+    b.fit(X, y)
+    np.testing.assert_array_almost_equal(a.feature_importances_,
+                                         b.feature_importances_)
+    assert_eq(p1, b.predict(X))
+
+
+def test_regressor(loop):  # noqa
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop):
+            a = dxgb.XGBRegressor()
+            X2 = da.from_array(X, 5)
+            y2 = da.from_array(y, 5)
+            a.fit(X2, y2)
+            p1 = a.predict(X2)
+
+    b = xgb.XGBRegressor()
+    b.fit(X, y)
+    assert_eq(p1, b.predict(X))
 
 
 @gen_cluster(client=True, timeout=None)

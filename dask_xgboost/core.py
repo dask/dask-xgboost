@@ -9,7 +9,7 @@ import pandas as pd
 from toolz import first, assoc
 from tornado import gen
 from dask import delayed
-from distributed.client import _wait
+from distributed.client import _wait, default_client
 from distributed.utils import sync
 import xgboost as xgb
 
@@ -64,7 +64,8 @@ def train_part(env, param, list_of_parts, **kwargs):
     data, labels = zip(*list_of_parts)  # Prepare data
     data = concat(data)                 # Concatenate many parts into one
     labels = concat(labels)
-    dtrain = xgb.DMatrix(data, labels)  # Convert to xgboost data structure
+    feature_names = getattr(data, 'columns', None)
+    dtrain = xgb.DMatrix(data, labels, feature_names=feature_names)
 
     args = [('%s=%s' % item).encode() for item in env.items()]
     xgb.rabit.init(args)
@@ -209,3 +210,76 @@ def predict(client, model, data):
                                  drop_axis=1)
 
     return result
+
+
+class XGBRegressor(xgb.XGBRegressor):
+
+    def fit(self, X, y=None):
+        """Fit the gradient boosting model
+
+        Parameters
+        ----------
+        X : array-like [n_samples, n_features]
+        y : array-like
+
+        Returns
+        -------
+        self : the fitted Regressor
+
+        Notes
+        -----
+        This differs from the XGBoost version not supporting the ``eval_set``,
+        ``eval_metric``, ``early_stopping_rounds`` and ``verbose`` fit
+        kwargs.
+        """
+        client = default_client()
+        xgb_options = self.get_xgb_params()
+        self._Booster = train(client, xgb_options, X, y,
+                              num_boost_round=self.n_estimators)
+        return self
+
+    def predict(self, X):
+        client = default_client()
+        return predict(client, self._Booster, X)
+
+
+class XGBClassifier(xgb.XGBClassifier):
+
+    def fit(self, X, y=None):
+        """Fit a gradient boosting classifier
+
+        Parameters
+        ----------
+        X : array-like [n_samples, n_features]
+            Feature Matrix. May be a dask.array or dask.dataframe
+        y : array-like
+            Labels
+
+        Returns
+        -------
+        self : XGBClassifier
+
+        Notes
+        -----
+        This differs from the XGBoost version in three ways
+
+        1. The ``sample_weight``, ``eval_set``, ``eval_metric``,
+          ``early_stopping_rounds`` and ``verbose`` fit kwargs are not
+          supported.
+        2. The labels are not automatically label-encoded
+        3. The ``classes_`` and ``n_classes_`` attributes are not learned
+        """
+        client = default_client()
+        xgb_options = self.get_xgb_params()
+        self._Booster = train(client, xgb_options, X, y,
+                              num_boost_round=self.n_estimators)
+        return self
+
+    def predict(self, X):
+        client = default_client()
+        class_probs = predict(client, self._Booster, X)
+        if class_probs.ndim > 1:
+            cidx = da.argmax(class_probs, axis=1)
+        else:
+            cidx = (class_probs > 0).astype(np.int64)
+        return cidx

@@ -50,7 +50,7 @@ def concat(L):
                         ". Got %s" % type(L[0]))
 
 
-def train_part(env, param, list_of_parts, **kwargs):
+def train_part(env, param, list_of_parts, dmatrix_kwargs={}, **kwargs):
     """
     Run part of XGBoost distributed workload
 
@@ -64,8 +64,8 @@ def train_part(env, param, list_of_parts, **kwargs):
     data, labels = zip(*list_of_parts)  # Prepare data
     data = concat(data)                 # Concatenate many parts into one
     labels = concat(labels)
-    feature_names = getattr(data, 'columns', None)
-    dtrain = xgb.DMatrix(data, labels, feature_names=feature_names)
+    dmatrix_kwargs["feature_names"] = getattr(data, 'columns', None)
+    dtrain = xgb.DMatrix(data, labels, **dmatrix_kwargs)
 
     args = [('%s=%s' % item).encode() for item in env.items()]
     xgb.rabit.init(args)
@@ -84,7 +84,7 @@ def train_part(env, param, list_of_parts, **kwargs):
 
 
 @gen.coroutine
-def _train(client, params, data, labels, **kwargs):
+def _train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
     """
     Asynchronous version of train
 
@@ -126,7 +126,8 @@ def _train(client, params, data, labels, **kwargs):
     # Tell each worker to train on the chunks/parts that it has locally
     futures = [client.submit(train_part, env,
                              assoc(params, 'nthreads', ncores[worker]),
-                             list_of_parts, workers=worker, **kwargs)
+                             list_of_parts, workers=worker,
+                             dmatrix_kwargs=dmatrix_kwargs, **kwargs)
                for worker, list_of_parts in worker_map.items()]
 
     # Get the results, only one will be non-None
@@ -135,7 +136,7 @@ def _train(client, params, data, labels, **kwargs):
     raise gen.Return(result)
 
 
-def train(client, params, data, labels, **kwargs):
+def train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
     """ Train an XGBoost model on a Dask Cluster
 
     This starts XGBoost on all Dask workers, moves input data to those workers,
@@ -148,8 +149,8 @@ def train(client, params, data, labels, **kwargs):
         Parameters to give to XGBoost (see xgb.Booster.train)
     data: dask array or dask.dataframe
     labels: dask.array or dask.dataframe
-    **kwargs:
-        Keywords to give to XGBoost
+    dmatrix_kwargs: Keywords to give to Xgboost DMatrix
+    **kwargs: Keywords to give to XGBoost train
 
     Examples
     --------
@@ -164,7 +165,8 @@ def train(client, params, data, labels, **kwargs):
     --------
     predict
     """
-    return sync(client.loop, _train, client, params, data, labels, **kwargs)
+    return sync(client.loop, _train, client, params, data,
+                labels, dmatrix_kwargs, **kwargs)
 
 
 def _predict_part(part, model=None):

@@ -208,7 +208,8 @@ def predict(client, model, data):
     if isinstance(data, dd._Frame):
         result = data.map_partitions(_predict_part, model=model)
     elif isinstance(data, da.Array):
-        result = data.map_blocks(_predict_part, model=model, dtype=float,
+        result = data.map_blocks(_predict_part, model=model,
+                                 dtype=np.float32,
                                  drop_axis=1)
 
     return result

@@ -76,6 +76,26 @@ def test_basic(c, s, a, b):
 
 
 @gen_cluster(client=True, timeout=None)
+def test_dmatrix_kwargs(c, s, a, b):
+    xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
+    dX = da.from_array(X, chunks=(2, 2))
+    dy = da.from_array(y, chunks=(2,))
+    dbst = yield dxgb._train(c, param, dX, dy, {"missing": 0.0})
+
+    # Distributed model matches local model with dmatrix kwargs
+    dtrain = xgb.DMatrix(X, label=y, missing=0.0)
+    bst = xgb.train(param, dtrain)
+    result = bst.predict(dtrain)
+    dresult = dbst.predict(dtrain)
+    assert np.abs(result - dresult).sum() < 0.02
+
+    # Distributed model gives bad predictions without dmatrix kwargs
+    dtrain_incompat = xgb.DMatrix(X, label=y)
+    dresult_incompat = dbst.predict(dtrain_incompat)
+    assert np.abs(result - dresult_incompat).sum() > 0.02
+
+
+@gen_cluster(client=True, timeout=None)
 def test_numpy(c, s, a, b):
     xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2))

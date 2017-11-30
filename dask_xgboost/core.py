@@ -125,7 +125,7 @@ def _train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
 
     # Tell each worker to train on the chunks/parts that it has locally
     futures = [client.submit(train_part, env,
-                             assoc(params, 'nthreads', ncores[worker]),
+                             assoc(params, 'nthread', ncores[worker]),
                              list_of_parts, workers=worker,
                              dmatrix_kwargs=dmatrix_kwargs, **kwargs)
                for worker, list_of_parts in worker_map.items()]

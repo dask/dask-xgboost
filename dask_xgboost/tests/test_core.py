@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 
+import pytest
+
 import dask.array as da
 from dask.array.utils import assert_eq
 import dask.dataframe as dd
@@ -139,3 +141,17 @@ def test_synchronous_api(loop):  # noqa
             correct = (result > 0.5) == labels
             dcorrect = (dresult > 0.5) == labels
             assert dcorrect.sum() >= correct.sum()
+
+
+@gen_cluster(client=True, timeout=None)
+def test_errors(c, s, a, b):
+    def f(part):
+        raise Exception('foo')
+
+    df = dd.demo.make_timeseries()
+    df = df.map_partitions(f, meta=df._meta)
+
+    with pytest.raises(Exception) as info:
+        yield dxgb.train(c, param, df, df.x)
+
+    assert 'foo' in str(info.value)

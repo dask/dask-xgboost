@@ -106,7 +106,11 @@ def _train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
     # Arrange parts into pairs.  This enforces co-locality
     parts = list(map(delayed, zip(data_parts, label_parts)))
     parts = client.compute(parts)  # Start computation in the background
-    yield _wait(parts)
+    yield wait(parts)
+
+    for part in parts:
+        if part.status == 'error':
+            yield part  # trigger error locally
 
     # Because XGBoost-python doesn't yet allow iterative training, we need to
     # find the locations of all chunks and map them to particular Dask workers

@@ -5,7 +5,7 @@ import xgboost as xgb
 import dask.array as da
 from dask.array.utils import assert_eq
 import dask.dataframe as dd
-from distributed import Client
+from dask.distributed import Client
 from distributed.utils_test import gen_cluster, loop, cluster  # noqa
 
 import dask_xgboost as dxgb
@@ -57,8 +57,8 @@ def test_basic(c, s, a, b):
 
     ddf = dd.from_pandas(df, npartitions=4)
     dlabels = dd.from_pandas(labels, npartitions=4)
-    dbst = yield dxgb._train(c, param, ddf, dlabels)
-    dbst = yield dxgb._train(c, param, ddf, dlabels)  # we can do this twice
+    dbst = yield dxgb.train(c, param, ddf, dlabels)
+    dbst = yield dxgb.train(c, param, ddf, dlabels)  # we can do this twice
 
     result = bst.predict(dtrain)
     dresult = dbst.predict(dtrain)
@@ -80,7 +80,7 @@ def test_dmatrix_kwargs(c, s, a, b):
     xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2))
     dy = da.from_array(y, chunks=(2,))
-    dbst = yield dxgb._train(c, param, dX, dy, {"missing": 0.0})
+    dbst = yield dxgb.train(c, param, dX, dy, {"missing": 0.0})
 
     # Distributed model matches local model with dmatrix kwargs
     dtrain = xgb.DMatrix(X, label=y, missing=0.0)
@@ -100,8 +100,8 @@ def test_numpy(c, s, a, b):
     xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2))
     dy = da.from_array(y, chunks=(2,))
-    dbst = yield dxgb._train(c, param, dX, dy)
-    dbst = yield dxgb._train(c, param, dX, dy)  # we can do this twice
+    dbst = yield dxgb.train(c, param, dX, dy)
+    dbst = yield dxgb.train(c, param, dX, dy)  # we can do this twice
 
     dtrain = xgb.DMatrix(X, label=y)
     bst = xgb.train(param, dtrain)

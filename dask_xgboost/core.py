@@ -2,15 +2,16 @@ from collections import defaultdict
 import logging
 from threading import Thread
 
-import dask.dataframe as dd
-import dask.array as da
 import numpy as np
 import pandas as pd
 from toolz import first, assoc
 from tornado import gen
+
 from dask import delayed
-from distributed.client import _wait, default_client
-from distributed.utils import sync
+from dask.distributed import wait, default_client
+import dask.dataframe as dd
+import dask.array as da
+
 import xgboost as xgb
 
 from .tracker import RabitTracker
@@ -105,7 +106,11 @@ def _train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
     # Arrange parts into pairs.  This enforces co-locality
     parts = list(map(delayed, zip(data_parts, label_parts)))
     parts = client.compute(parts)  # Start computation in the background
-    yield _wait(parts)
+    yield wait(parts)
+
+    for part in parts:
+        if part.status == 'error':
+            yield part  # trigger error locally
 
     # Because XGBoost-python doesn't yet allow iterative training, we need to
     # find the locations of all chunks and map them to particular Dask workers
@@ -165,8 +170,8 @@ def train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
     --------
     predict
     """
-    return sync(client.loop, _train, client, params, data,
-                labels, dmatrix_kwargs, **kwargs)
+    return client.sync(_train, client, params, data,
+                       labels, dmatrix_kwargs, **kwargs)
 
 
 def _predict_part(part, model=None):

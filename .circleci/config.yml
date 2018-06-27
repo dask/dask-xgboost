@@ -23,7 +23,6 @@ jobs:
           # TODO: Check on the conda-forge recipe for why this is nescessary
           command: |
             source activate test-environment
-            ln -s /opt/conda/lib/libgomp.so.1 ${CONDA_PREFIX}/lib/
       - run:
           command: |
             source activate test-environment

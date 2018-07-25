@@ -5,7 +5,7 @@ from setuptools import setup
 
 requires = open('requirements.txt').read().strip().split('\n')
 install_requires = []
-extras_require = {}
+extras_require = {'sparse': ['sparse']}
 for r in requires:
     if ';' in r:
         # requirements.txt conditional dependencies need to be reformatted for

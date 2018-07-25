@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import xgboost as xgb
+import sparse
 
 import pytest
 
@@ -102,6 +103,32 @@ def test_numpy(c, s, a, b):
     xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2))
     dy = da.from_array(y, chunks=(2,))
+    dbst = yield dxgb.train(c, param, dX, dy)
+    dbst = yield dxgb.train(c, param, dX, dy)  # we can do this twice
+
+    dtrain = xgb.DMatrix(X, label=y)
+    bst = xgb.train(param, dtrain)
+
+    result = bst.predict(dtrain)
+    dresult = dbst.predict(dtrain)
+
+    correct = (result > 0.5) == y
+    dcorrect = (dresult > 0.5) == y
+    assert dcorrect.sum() >= correct.sum()
+
+    predictions = dxgb.predict(c, dbst, dX)
+    assert isinstance(predictions, da.Array)
+    predictions = yield c.compute(predictions)._result()
+    assert isinstance(predictions, np.ndarray)
+
+    assert ((predictions > 0.5) != labels).sum() < 2
+
+
+@gen_cluster(client=True, timeout=None)
+def test_sparse(c, s, a, b):
+    xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
+    dX = da.from_array(sparse.COO.from_numpy(X), chunks=(2, 2))
+    dy = da.from_array(sparse.COO.from_numpy(y), chunks=(2,))
     dbst = yield dxgb.train(c, param, dX, dy)
     dbst = yield dxgb.train(c, param, dX, dy)  # we can do this twice
 

@@ -9,8 +9,10 @@ from tornado import gen
 
 try:
     import sparse
+    import scipy.sparse as ss
 except ImportError:
     sparse = False
+    ss = False
 
 from dask import delayed
 from dask.distributed import wait, default_client
@@ -51,8 +53,10 @@ def concat(L):
         return np.concatenate(L, axis=0)
     elif isinstance(L[0], (pd.DataFrame, pd.Series)):
         return pd.concat(L, axis=0)
+    elif ss and isinstance(L[0], ss.spmatrix):
+        return ss.vstack(L, format='csr')
     elif sparse and isinstance(L[0], sparse.SparseArray):
-        return sparse.concatenate(L[0], axis=0)
+        return sparse.concatenate(L, axis=0)
     else:
         raise TypeError("Data must be either numpy arrays or pandas dataframes"
                         ". Got %s" % type(L[0]))

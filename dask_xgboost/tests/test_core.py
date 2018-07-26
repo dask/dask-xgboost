@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 import sparse
+import scipy.sparse
 
 import pytest
 
@@ -98,6 +99,21 @@ def test_dmatrix_kwargs(c, s, a, b):
     assert np.abs(result - dresult_incompat).sum() > 0.02
 
 
+def _test_container(dbst, predictions, X_type):
+    dtrain = xgb.DMatrix(X_type(X), label=y)
+    bst = xgb.train(param, dtrain)
+
+    result = bst.predict(dtrain)
+    dresult = dbst.predict(dtrain)
+
+    correct = (result > 0.5) == y
+    dcorrect = (dresult > 0.5) == y
+
+    assert dcorrect.sum() >= correct.sum()
+    assert isinstance(predictions, np.ndarray)
+    assert ((predictions > 0.5) != labels).sum() < 2
+
+
 @gen_cluster(client=True, timeout=None)
 def test_numpy(c, s, a, b):
     xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
@@ -106,48 +122,40 @@ def test_numpy(c, s, a, b):
     dbst = yield dxgb.train(c, param, dX, dy)
     dbst = yield dxgb.train(c, param, dX, dy)  # we can do this twice
 
-    dtrain = xgb.DMatrix(X, label=y)
-    bst = xgb.train(param, dtrain)
+    predictions = dxgb.predict(c, dbst, dX)
+    assert isinstance(predictions, da.Array)
+    predictions = yield c.compute(predictions)
+    _test_container(dbst, predictions, np.array)
 
-    result = bst.predict(dtrain)
-    dresult = dbst.predict(dtrain)
 
-    correct = (result > 0.5) == y
-    dcorrect = (dresult > 0.5) == y
-    assert dcorrect.sum() >= correct.sum()
+@gen_cluster(client=True, timeout=None)
+def test_scipy_sparse(c, s, a, b):
+    xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
+    dX = da.from_array(X, chunks=(2, 2)).map_blocks(scipy.sparse.csr_matrix)
+    dy = da.from_array(y, chunks=(2,))
+    dbst = yield dxgb.train(c, param, dX, dy)
+    dbst = yield dxgb.train(c, param, dX, dy)  # we can do this twice
 
     predictions = dxgb.predict(c, dbst, dX)
     assert isinstance(predictions, da.Array)
-    predictions = yield c.compute(predictions)._result()
-    assert isinstance(predictions, np.ndarray)
 
-    assert ((predictions > 0.5) != labels).sum() < 2
+    predictions_result = yield c.compute(predictions)
+    _test_container(dbst, predictions_result, scipy.sparse.csr_matrix)
 
 
 @gen_cluster(client=True, timeout=None)
 def test_sparse(c, s, a, b):
     xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
-    dX = da.from_array(sparse.COO.from_numpy(X), chunks=(2, 2))
-    dy = da.from_array(sparse.COO.from_numpy(y), chunks=(2,))
+    dX = da.from_array(X, chunks=(2, 2)).map_blocks(sparse.COO)
+    dy = da.from_array(y, chunks=(2,))
     dbst = yield dxgb.train(c, param, dX, dy)
     dbst = yield dxgb.train(c, param, dX, dy)  # we can do this twice
 
-    dtrain = xgb.DMatrix(X, label=y)
-    bst = xgb.train(param, dtrain)
-
-    result = bst.predict(dtrain)
-    dresult = dbst.predict(dtrain)
-
-    correct = (result > 0.5) == y
-    dcorrect = (dresult > 0.5) == y
-    assert dcorrect.sum() >= correct.sum()
-
     predictions = dxgb.predict(c, dbst, dX)
     assert isinstance(predictions, da.Array)
-    predictions = yield c.compute(predictions)._result()
-    assert isinstance(predictions, np.ndarray)
 
-    assert ((predictions > 0.5) != labels).sum() < 2
+    predictions_result = yield c.compute(predictions)
+    _test_container(dbst, predictions_result, sparse.COO)
 
 
 def test_synchronous_api(loop):  # noqa

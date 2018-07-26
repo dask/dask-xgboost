@@ -124,7 +124,7 @@ def test_numpy(c, s, a, b):
 
     predictions = dxgb.predict(c, dbst, dX)
     assert isinstance(predictions, da.Array)
-    predictions = yield c.compute(predictions)._result()
+    predictions = yield c.compute(predictions)
     _test_container(dbst, predictions, np.array)
 
 
@@ -139,7 +139,7 @@ def test_scipy_sparse(c, s, a, b):
     predictions = dxgb.predict(c, dbst, dX)
     assert isinstance(predictions, da.Array)
 
-    predictions_result = yield c.compute(predictions)._result()
+    predictions_result = yield c.compute(predictions)
     _test_container(dbst, predictions_result, scipy.sparse.csr_matrix)
 
 
@@ -154,7 +154,7 @@ def test_sparse(c, s, a, b):
     predictions = dxgb.predict(c, dbst, dX)
     assert isinstance(predictions, da.Array)
 
-    predictions_result = yield c.compute(predictions)._result()
+    predictions_result = yield c.compute(predictions)
     _test_container(dbst, predictions_result, sparse.COO)
 
 

@@ -38,6 +38,26 @@ def test_classifier(loop):  # noqa
     assert_eq(p1, b.predict(X))
 
 
+def test_classifier_multi(loop):  # noqa
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop):
+            a = dxgb.XGBClassifier(num_class=3, n_estimators=10,
+                                   objective="multi:softprob")
+            X2 = da.from_array(X, 5)
+            y2 = da.from_array(
+                np.array([0, 1, 2, 0, 1, 2, 0, 0, 0, 1]),
+                chunks=5,
+            )
+            a.fit(X2, y2)
+            p1 = a.predict(X2)
+            expected = y2.shape + (3,)
+            assert p1.shape == expected
+
+            result = p1.compute()
+            assert result.shape == y2.shape + (3,)
+
+
+
 def test_regressor(loop):  # noqa
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop):

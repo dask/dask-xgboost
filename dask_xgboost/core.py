@@ -51,7 +51,7 @@ def concat(L):
                         ". Got %s" % type(L[0]))
 
 
-def train_part(env, param, list_of_parts, dmatrix_kwargs={}, **kwargs):
+def train_part(env, param, list_of_parts, dmatrix_kwargs=None, **kwargs):
     """
     Run part of XGBoost distributed workload
 
@@ -65,6 +65,9 @@ def train_part(env, param, list_of_parts, dmatrix_kwargs={}, **kwargs):
     data, labels = zip(*list_of_parts)  # Prepare data
     data = concat(data)                 # Concatenate many parts into one
     labels = concat(labels)
+    if dmatrix_kwargs is None:
+        dmatrix_kwargs = {}
+
     dmatrix_kwargs["feature_names"] = getattr(data, 'columns', None)
     dtrain = xgb.DMatrix(data, labels, **dmatrix_kwargs)
 
@@ -138,6 +141,7 @@ def _train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
     # Get the results, only one will be non-None
     results = yield client._gather(futures)
     result = [v for v in results if v][0]
+    result.set_attr(num_class=params.get("num_class"))
     raise gen.Return(result)
 
 
@@ -213,9 +217,21 @@ def predict(client, model, data):
     if isinstance(data, dd._Frame):
         result = data.map_partitions(_predict_part, model=model)
     elif isinstance(data, da.Array):
+        num_class = moddel.attr("num_class") or 2
+        num_class = int(num_class)
+
+        if num_class > 2:
+            kwargs = dict(
+                drop_axis=None,
+                chunks=(data.chunks[0], (num_class,)),
+            )
+        else:
+            kwargs = dict(
+                drop_axis=1,
+            )
         result = data.map_blocks(_predict_part, model=model,
                                  dtype=np.float32,
-                                 drop_axis=1)
+                                 **kwargs)
 
     return result
 

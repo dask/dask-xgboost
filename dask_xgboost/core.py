@@ -141,7 +141,7 @@ def _train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
     # Get the results, only one will be non-None
     results = yield client._gather(futures)
     result = [v for v in results if v][0]
-    result.set_attr(num_class=params.get("num_class"))
+    result.set_attr(num_class=str(params.get("num_class")))
     raise gen.Return(result)
 
 
@@ -217,7 +217,7 @@ def predict(client, model, data):
     if isinstance(data, dd._Frame):
         result = data.map_partitions(_predict_part, model=model)
     elif isinstance(data, da.Array):
-        num_class = moddel.attr("num_class") or 2
+        num_class = model.attr("num_class") or 2
         num_class = int(num_class)
 
         if num_class > 2:
@@ -302,8 +302,17 @@ class XGBClassifier(xgb.XGBClassifier):
     def predict(self, X):
         client = default_client()
         class_probs = predict(client, self._Booster, X)
+        assert self._Booster.attr("num_class")
         if class_probs.ndim > 1:
             cidx = da.argmax(class_probs, axis=1)
         else:
             cidx = (class_probs > 0).astype(np.int64)
         return cidx
+
+    def predict_proba(self, data, ntree_limit=None):
+        client = default_client()
+        if ntree_limit is not None:
+            raise NotImplementedError("'ntree_limit' is not currently "
+                                      "supported.")
+        class_probs = predict(client, self._Booster, data)
+        return class_probs

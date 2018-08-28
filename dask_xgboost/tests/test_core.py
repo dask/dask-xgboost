@@ -50,12 +50,17 @@ def test_classifier_multi(loop):  # noqa
             )
             a.fit(X2, y2)
             p1 = a.predict(X2)
-            expected = y2.shape + (3,)
+            expected = y2.shape
             assert p1.shape == expected
 
             result = p1.compute()
-            assert result.shape == y2.shape + (3,)
+            assert result.shape == expected
 
+            # proba
+            p2 = a.predict_proba(X2)
+            expected = y2.shape + (3,)
+            assert p2.shape == expected
+            assert p2.compute().shape == expected
 
 
 def test_regressor(loop):  # noqa

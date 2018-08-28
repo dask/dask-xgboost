@@ -304,7 +304,6 @@ class XGBClassifier(xgb.XGBClassifier):
     def predict(self, X):
         client = default_client()
         class_probs = predict(client, self._Booster, X)
-        assert self._Booster.attr("num_class")
         if class_probs.ndim > 1:
             cidx = da.argmax(class_probs, axis=1)
         else:

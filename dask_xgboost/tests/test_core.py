@@ -4,6 +4,7 @@ import xgboost as xgb
 
 import pytest
 
+import dask
 import dask.array as da
 from dask.array.utils import assert_eq
 import dask.dataframe as dd
@@ -38,29 +39,41 @@ def test_classifier(loop):  # noqa
     assert_eq(p1, b.predict(X))
 
 
-def test_classifier_multi(loop):  # noqa
+@pytest.mark.parametrize("kind", ['array', 'dataframe'])  # noqa
+def test_classifier_multi(kind, loop):
+
+    if kind == 'array':
+        X2 = da.from_array(X, 5)
+        y2 = da.from_array(
+            np.array([0, 1, 2, 0, 1, 2, 0, 0, 0, 1]),
+            chunks=5,
+        )
+    else:
+        X2 = dd.from_pandas(df, npartitions=2)
+        y2 = dd.from_pandas(labels, npartitions=2)
+
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop):
             a = dxgb.XGBClassifier(num_class=3, n_estimators=10,
                                    objective="multi:softprob")
-            X2 = da.from_array(X, 5)
-            y2 = da.from_array(
-                np.array([0, 1, 2, 0, 1, 2, 0, 0, 0, 1]),
-                chunks=5,
-            )
             a.fit(X2, y2)
             p1 = a.predict(X2)
-            expected = y2.shape
-            assert p1.shape == expected
+
+            assert dask.is_dask_collection(p1)
+
+            if kind == 'array':
+                assert p1.shape == (10,)
 
             result = p1.compute()
-            assert result.shape == expected
+            assert result.shape == (10,)
 
             # proba
             p2 = a.predict_proba(X2)
-            expected = y2.shape + (3,)
-            assert p2.shape == expected
-            assert p2.compute().shape == expected
+            assert dask.is_dask_collection(p2)
+
+            if kind == 'array':
+                assert p2.shape == (10, 3)
+            assert p2.compute().shape == (10, 3)
 
 
 def test_regressor(loop):  # noqa

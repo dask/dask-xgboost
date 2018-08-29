@@ -182,11 +182,17 @@ def train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
 
 def _predict_part(part, model=None):
     xgb.rabit.init()
-    dm = xgb.DMatrix(part)
-    result = model.predict(dm)
-    xgb.rabit.finalize()
+    try:
+        dm = xgb.DMatrix(part)
+        result = model.predict(dm)
+    finally:
+        xgb.rabit.finalize()
+
     if isinstance(part, pd.DataFrame):
-        result = pd.Series(result, index=part.index, name='predictions')
+        if model.attr("num_class"):
+            result = pd.DataFrame(result, index=part.index)
+        else:
+            result = pd.Series(result, index=part.index, name='predictions')
     return result
 
 
@@ -305,7 +311,12 @@ class XGBClassifier(xgb.XGBClassifier):
         client = default_client()
         class_probs = predict(client, self._Booster, X)
         if class_probs.ndim > 1:
-            cidx = da.argmax(class_probs, axis=1)
+            if isinstance(X, da.Array):
+                cidx = da.argmax(class_probs, axis=1)
+            else:
+                cidx = X.map_partitions(
+                    lambda partition: np.argmax(partition.values, axis=1)
+                )
         else:
             cidx = (class_probs > 0).astype(np.int64)
         return cidx

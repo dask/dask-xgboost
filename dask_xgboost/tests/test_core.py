@@ -73,8 +73,6 @@ def test_classifier_multi(kind, loop):
 
             if kind == 'array':
                 assert p2.shape == (10, 3)
-            else:
-                assert p2.shape[1] == 3
             assert p2.compute().shape == (10, 3)
 
 

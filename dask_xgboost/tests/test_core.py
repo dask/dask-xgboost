@@ -59,8 +59,8 @@ def test_multiclass_classifier(loop):  # noqa
     c = xgb.XGBClassifier()  # frame
     d = dxgb.XGBClassifier()
 
-    with cluster() as (s, [a, b]):
-        with Client(s['address'], loop=loop) as c:
+    with cluster() as (s, [_, _]):
+        with Client(s['address'], loop=loop):
             # fit
             a.fit(X, y)  # array
             b.fit(dX, dy, classes=[0, 1, 2])

@@ -11,6 +11,7 @@ import dask.array as da
 from dask.array.utils import assert_eq
 import dask.dataframe as dd
 from dask.distributed import Client
+from sklearn.datasets import load_iris
 from distributed.utils_test import gen_cluster, loop, cluster  # noqa
 
 import dask_xgboost as dxgb
@@ -39,6 +40,38 @@ def test_classifier(loop):  # noqa
     np.testing.assert_array_almost_equal(a.feature_importances_,
                                          b.feature_importances_)
     assert_eq(p1, b.predict(X))
+
+
+def test_multiclass_classifier(loop):  # noqa
+    # data
+    iris = load_iris()
+    X, y = iris.data, iris.target
+    dX = da.from_array(X, 5)
+    dy = da.from_array(y, 5)
+    df = pd.DataFrame(X, columns=iris.feature_names)
+    labels = pd.Series(y, name='target')
+
+    ddf = dd.from_pandas(df, 2)
+    dlabels = dd.from_pandas(labels, 2)
+    # model
+    a = xgb.XGBClassifier()  # array
+    b = dxgb.XGBClassifier()
+    c = xgb.XGBClassifier()  # frame
+    d = dxgb.XGBClassifier()
+
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            # fit
+            a.fit(X, y)  # array
+            b.fit(dX, dy, classes=[0, 1, 2])
+            c.fit(df, labels)  # frame
+            d.fit(ddf, dlabels, classes=[0, 1, 2])
+
+            # check
+            da.utils.assert_eq(a.predict(X), b.predict(dX))
+            da.utils.assert_eq(a.predict_proba(X), b.predict_proba(dX))
+            da.utils.assert_eq(c.predict(df), d.predict(ddf))
+            da.utils.assert_eq(c.predict_proba(df), d.predict_proba(ddf))
 
 
 @pytest.mark.parametrize("kind", ['array', 'dataframe'])  # noqa

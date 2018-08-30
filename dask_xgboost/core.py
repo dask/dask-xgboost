@@ -62,7 +62,7 @@ def concat(L):
                         ". Got %s" % type(L[0]))
 
 
-def train_part(env, param, list_of_parts, dmatrix_kwargs={}, **kwargs):
+def train_part(env, param, list_of_parts, dmatrix_kwargs=None, **kwargs):
     """
     Run part of XGBoost distributed workload
 
@@ -76,6 +76,9 @@ def train_part(env, param, list_of_parts, dmatrix_kwargs={}, **kwargs):
     data, labels = zip(*list_of_parts)  # Prepare data
     data = concat(data)                 # Concatenate many parts into one
     labels = concat(labels)
+    if dmatrix_kwargs is None:
+        dmatrix_kwargs = {}
+
     dmatrix_kwargs["feature_names"] = getattr(data, 'columns', None)
     dtrain = xgb.DMatrix(data, labels, **dmatrix_kwargs)
 
@@ -149,6 +152,9 @@ def _train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
     # Get the results, only one will be non-None
     results = yield client._gather(futures)
     result = [v for v in results if v][0]
+    num_class = params.get("num_class")
+    if num_class:
+        result.set_attr(num_class=str(num_class))
     raise gen.Return(result)
 
 
@@ -187,11 +193,17 @@ def train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
 
 def _predict_part(part, model=None):
     xgb.rabit.init()
-    dm = xgb.DMatrix(part)
-    result = model.predict(dm)
-    xgb.rabit.finalize()
+    try:
+        dm = xgb.DMatrix(part)
+        result = model.predict(dm)
+    finally:
+        xgb.rabit.finalize()
+
     if isinstance(part, pd.DataFrame):
-        result = pd.Series(result, index=part.index, name='predictions')
+        if model.attr("num_class"):
+            result = pd.DataFrame(result, index=part.index)
+        else:
+            result = pd.Series(result, index=part.index, name='predictions')
     return result
 
 
@@ -224,9 +236,21 @@ def predict(client, model, data):
     if isinstance(data, dd._Frame):
         result = data.map_partitions(_predict_part, model=model)
     elif isinstance(data, da.Array):
+        num_class = model.attr("num_class") or 2
+        num_class = int(num_class)
+
+        if num_class > 2:
+            kwargs = dict(
+                drop_axis=None,
+                chunks=(data.chunks[0], (num_class,)),
+            )
+        else:
+            kwargs = dict(
+                drop_axis=1,
+            )
         result = data.map_blocks(_predict_part, model=model,
                                  dtype=np.float32,
-                                 drop_axis=1)
+                                 **kwargs)
 
     return result
 
@@ -298,7 +322,20 @@ class XGBClassifier(xgb.XGBClassifier):
         client = default_client()
         class_probs = predict(client, self._Booster, X)
         if class_probs.ndim > 1:
-            cidx = da.argmax(class_probs, axis=1)
+            if isinstance(X, da.Array):
+                cidx = da.argmax(class_probs, axis=1)
+            else:
+                cidx = X.map_partitions(
+                    lambda partition: np.argmax(partition.values, axis=1)
+                )
         else:
             cidx = (class_probs > 0).astype(np.int64)
         return cidx
+
+    def predict_proba(self, data, ntree_limit=None):
+        client = default_client()
+        if ntree_limit is not None:
+            raise NotImplementedError("'ntree_limit' is not currently "
+                                      "supported.")
+        class_probs = predict(client, self._Booster, data)
+        return class_probs

@@ -16,6 +16,14 @@ from distributed.utils_test import gen_cluster, loop, cluster  # noqa
 
 import dask_xgboost as dxgb
 
+# Workaround for conflict with distributed 1.23.0
+# https://github.com/dask/dask-xgboost/pull/27#issuecomment-417474734
+from concurrent.futures import ThreadPoolExecutor
+import distributed.comm.utils
+
+distributed.comm.utils._offload_executor = ThreadPoolExecutor(max_workers=2)
+
+
 df = pd.DataFrame({'x': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
                    'y': [1, 0, 1, 0, 1, 0, 1, 0, 1, 0]})
 labels = pd.Series([1, 0, 1, 0, 1, 0, 1, 1, 1, 1])

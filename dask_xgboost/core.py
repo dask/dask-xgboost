@@ -319,7 +319,11 @@ class XGBClassifier(xgb.XGBClassifier):
         client = default_client()
 
         if classes is None:
-            classes = da.unique(y).compute()
+            if isinstance(y, da.Array):
+                classes = da.unique(y)
+            else:
+                classes = y.unique()
+            classes = classes.compute()
         else:
             classes = np.asarray(classes)
         self.classes_ = classes

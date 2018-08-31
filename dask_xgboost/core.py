@@ -375,7 +375,10 @@ class XGBClassifier(xgb.XGBClassifier):
 
         class_probs = predict(client, self._Booster, X)
         if class_probs.ndim > 1:
-            cidx = da.argmax(class_probs, axis=1)
+            if isinstance(class_probs, (pd.DataFrame, np.ndarray)):
+                cidx = np.argmax(class_probs, axis=1)
+            else:
+                cidx = da.argmax(class_probs, axis=1)
         else:
             cidx = (class_probs > 0).astype(np.int64)
         return cidx

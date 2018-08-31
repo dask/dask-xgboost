@@ -152,6 +152,7 @@ def test_basic(c, s, a, b):
 
 @gen_cluster(client=True, timeout=None)
 def test_dmatrix_kwargs(c, s, a, b):
+    xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2))
     dy = da.from_array(y, chunks=(2,))
     dbst = yield dxgb.train(c, param, dX, dy, {"missing": 0.0})
@@ -186,6 +187,7 @@ def _test_container(dbst, predictions, X_type):
 
 @gen_cluster(client=True, timeout=None)
 def test_numpy(c, s, a, b):
+    xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2))
     dy = da.from_array(y, chunks=(2,))
     dbst = yield dxgb.train(c, param, dX, dy)
@@ -199,6 +201,7 @@ def test_numpy(c, s, a, b):
 
 @gen_cluster(client=True, timeout=None)
 def test_scipy_sparse(c, s, a, b):
+    xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2)).map_blocks(scipy.sparse.csr_matrix)
     dy = da.from_array(y, chunks=(2,))
     dbst = yield dxgb.train(c, param, dX, dy)
@@ -213,6 +216,7 @@ def test_scipy_sparse(c, s, a, b):
 
 @gen_cluster(client=True, timeout=None)
 def test_sparse(c, s, a, b):
+    xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2)).map_blocks(sparse.COO)
     dy = da.from_array(y, chunks=(2,))
     dbst = yield dxgb.train(c, param, dX, dy)

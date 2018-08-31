@@ -1,6 +1,5 @@
 from collections import defaultdict
 import logging
-import threading
 from threading import Thread
 
 import numpy as np
@@ -17,7 +16,6 @@ except ImportError:
 
 from dask import delayed
 from dask.distributed import wait, default_client
-from distributed.worker import thread_state, get_thread_identity, get_worker
 import dask.dataframe as dd
 import dask.array as da
 
@@ -26,40 +24,6 @@ import xgboost as xgb
 from .tracker import RabitTracker
 
 logger = logging.getLogger(__name__)
-worker_logger = logging.getLogger('distributed.worker')
-
-thread_state.dxgb_initialized = False
-thread_state.dxgb_finalized = False
-
-
-class _XGBService(object):
-    def stop(self):
-        if not getattr(thread_state, 'dxgb_initialized', False):
-            worker_logger.info("rabit.init never called on thread %s",
-                               get_thread_identity())
-        elif getattr(thread_state, 'dxgb_finalized', False):
-            worker_logger.warning("rabit.finalized already called on thread %s",
-                                  get_thread_identity())
-        else:
-            thread_state.dxgb_finalized = True
-            xgb.rabit.finalize()
-
-
-def _init_rabit(args=None):
-    if getattr(thread_state, 'dxgb_initialized', False):
-        worker_logger.warning("rabit.init already called on thread %s",
-                              get_thread_identity())
-    else:
-        try:
-            worker = get_worker()
-        except ValueError:
-            # why would this be called on a non-worker?
-            pass
-        else:
-            thread_state.dxgb_initialized = True
-            worker.services['dask-xgboost'] = _XGBService()
-            xgb.rabit.init(args)
-            worker_logger.info("Starting Rabit, Rank %d", xgb.rabit.get_rank())
 
 
 def parse_host_port(address):
@@ -119,13 +83,18 @@ def train_part(env, param, list_of_parts, dmatrix_kwargs=None, **kwargs):
     dtrain = xgb.DMatrix(data, labels, **dmatrix_kwargs)
 
     args = [('%s=%s' % item).encode() for item in env.items()]
-    _init_rabit(args)
-    bst = xgb.train(param, dtrain, **kwargs)
+    xgb.rabit.init(args)
+    try:
+        logger.info("Starting Rabit, Rank %d", xgb.rabit.get_rank())
 
-    if xgb.rabit.get_rank() == 0:  # Only return from one worker
-        result = bst
-    else:
-        result = None
+        bst = xgb.train(param, dtrain, **kwargs)
+
+        if xgb.rabit.get_rank() == 0:  # Only return from one worker
+            result = bst
+        else:
+            result = None
+    finally:
+        xgb.rabit.finalize()
     return result
 
 
@@ -223,15 +192,12 @@ def train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
 
 
 def _predict_part(part, model=None):
-    # Ohhh is this run for metadata purposese?
+    xgb.rabit.init()
     try:
-        get_worker()
-    except ValueError:
-        pass
-    else:
-        _init_rabit()
-    dm = xgb.DMatrix(part)
-    result = model.predict(dm)
+        dm = xgb.DMatrix(part)
+        result = model.predict(dm)
+    finally:
+        xgb.rabit.finalize()
 
     if isinstance(part, pd.DataFrame):
         if model.attr("num_class"):

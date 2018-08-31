@@ -11,9 +11,18 @@ import dask.array as da
 from dask.array.utils import assert_eq
 import dask.dataframe as dd
 from dask.distributed import Client
+from sklearn.datasets import load_iris
 from distributed.utils_test import gen_cluster, loop, cluster  # noqa
 
 import dask_xgboost as dxgb
+
+# Workaround for conflict with distributed 1.23.0
+# https://github.com/dask/dask-xgboost/pull/27#issuecomment-417474734
+from concurrent.futures import ThreadPoolExecutor
+import distributed.comm.utils
+
+distributed.comm.utils._offload_executor = ThreadPoolExecutor(max_workers=2)
+
 
 df = pd.DataFrame({'x': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
                    'y': [1, 0, 1, 0, 1, 0, 1, 0, 1, 0]})
@@ -39,6 +48,38 @@ def test_classifier(loop):  # noqa
     np.testing.assert_array_almost_equal(a.feature_importances_,
                                          b.feature_importances_)
     assert_eq(p1, b.predict(X))
+
+
+def test_multiclass_classifier(loop):  # noqa
+    # data
+    iris = load_iris()
+    X, y = iris.data, iris.target
+    dX = da.from_array(X, 5)
+    dy = da.from_array(y, 5)
+    df = pd.DataFrame(X, columns=iris.feature_names)
+    labels = pd.Series(y, name='target')
+
+    ddf = dd.from_pandas(df, 2)
+    dlabels = dd.from_pandas(labels, 2)
+    # model
+    a = xgb.XGBClassifier()  # array
+    b = dxgb.XGBClassifier()
+    c = xgb.XGBClassifier()  # frame
+    d = dxgb.XGBClassifier()
+
+    with cluster() as (s, [_, _]):
+        with Client(s['address'], loop=loop):
+            # fit
+            a.fit(X, y)  # array
+            b.fit(dX, dy, classes=[0, 1, 2])
+            c.fit(df, labels)  # frame
+            d.fit(ddf, dlabels, classes=[0, 1, 2])
+
+            # check
+            da.utils.assert_eq(a.predict(X), b.predict(dX))
+            da.utils.assert_eq(a.predict_proba(X), b.predict_proba(dX))
+            da.utils.assert_eq(c.predict(df), d.predict(ddf))
+            da.utils.assert_eq(c.predict_proba(df), d.predict_proba(ddf))
 
 
 @pytest.mark.parametrize("kind", ['array', 'dataframe'])  # noqa
@@ -92,7 +133,7 @@ def test_regressor(loop):  # noqa
     assert_eq(p1, b.predict(X))
 
 
-@gen_cluster(client=True, timeout=None)
+@gen_cluster(client=True, timeout=None, check_new_threads=False)
 def test_basic(c, s, a, b):
     dtrain = xgb.DMatrix(df, label=labels)
     bst = xgb.train(param, dtrain)
@@ -110,14 +151,14 @@ def test_basic(c, s, a, b):
     assert dcorrect.sum() >= correct.sum()
 
     predictions = dxgb.predict(c, dbst, ddf)
-    assert isinstance(predictions, dd.Series)
+    assert isinstance(predictions, da.Array)
     predictions = yield c.compute(predictions)._result()
-    assert isinstance(predictions, pd.Series)
+    assert isinstance(predictions, np.ndarray)
 
     assert ((predictions > 0.5) != labels).sum() < 2
 
 
-@gen_cluster(client=True, timeout=None)
+@gen_cluster(client=True, timeout=None, check_new_threads=False)
 def test_dmatrix_kwargs(c, s, a, b):
     xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2))
@@ -152,7 +193,7 @@ def _test_container(dbst, predictions, X_type):
     assert ((predictions > 0.5) != labels).sum() < 2
 
 
-@gen_cluster(client=True, timeout=None)
+@gen_cluster(client=True, timeout=None, check_new_threads=False)
 def test_numpy(c, s, a, b):
     xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2))
@@ -166,7 +207,7 @@ def test_numpy(c, s, a, b):
     _test_container(dbst, predictions, np.array)
 
 
-@gen_cluster(client=True, timeout=None)
+@gen_cluster(client=True, timeout=None, check_new_threads=False)
 def test_scipy_sparse(c, s, a, b):
     xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2)).map_blocks(scipy.sparse.csr_matrix)
@@ -181,7 +222,7 @@ def test_scipy_sparse(c, s, a, b):
     _test_container(dbst, predictions_result, scipy.sparse.csr_matrix)
 
 
-@gen_cluster(client=True, timeout=None)
+@gen_cluster(client=True, timeout=None, check_new_threads=False)
 def test_sparse(c, s, a, b):
     xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2)).map_blocks(sparse.COO)
@@ -216,7 +257,7 @@ def test_synchronous_api(loop):  # noqa
             assert dcorrect.sum() >= correct.sum()
 
 
-@gen_cluster(client=True, timeout=None)
+@gen_cluster(client=True, timeout=None, check_new_threads=False)
 def test_errors(c, s, a, b):
     def f(part):
         raise Exception('foo')

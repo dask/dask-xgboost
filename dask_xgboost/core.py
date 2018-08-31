@@ -235,6 +235,7 @@ def predict(client, model, data):
     """
     if isinstance(data, dd._Frame):
         result = data.map_partitions(_predict_part, model=model)
+        result = result.values
     elif isinstance(data, da.Array):
         num_class = model.attr("num_class") or 2
         num_class = int(num_class)
@@ -288,7 +289,7 @@ class XGBRegressor(xgb.XGBRegressor):
 
 class XGBClassifier(xgb.XGBClassifier):
 
-    def fit(self, X, y=None):
+    def fit(self, X, y=None, classes=None):
         """Fit a gradient boosting classifier
 
         Parameters
@@ -297,6 +298,9 @@ class XGBClassifier(xgb.XGBClassifier):
             Feature Matrix. May be a dask.array or dask.dataframe
         y : array-like
             Labels
+        classes : sequence, optional
+            The unique values in `y`. If no specified, this will be
+            eagerly computed from `y` before training.
 
         Returns
         -------
@@ -313,7 +317,36 @@ class XGBClassifier(xgb.XGBClassifier):
         3. The ``classes_`` and ``n_classes_`` attributes are not learned
         """
         client = default_client()
+
+        if classes is None:
+            if isinstance(y, da.Array):
+                classes = da.unique(y)
+            else:
+                classes = y.unique()
+            classes = classes.compute()
+        else:
+            classes = np.asarray(classes)
+        self.classes_ = classes
+        self.n_classes_ = len(self.classes_)
+
         xgb_options = self.get_xgb_params()
+
+        if self.n_classes_ > 2:
+            # xgboost just ignores the user-provided objective
+            # We only overwrite if it's the default...
+            if xgb_options['objective'] == "binary:logistic":
+                xgb_options["objective"] = "multi:softprob"
+
+            xgb_options.setdefault('num_class', self.n_classes_)
+
+        # xgboost sets this to self.objective, which I think is wrong
+        # hyper-parameters should not be updated during fit.
+        self.objective = xgb_options['objective']
+
+        # TODO: auto label-encode y
+        # that will require a dependency on dask-ml
+        # TODO: sample weight
+
         self._Booster = train(client, xgb_options, X, y,
                               num_boost_round=self.n_estimators)
         return self
@@ -322,12 +355,7 @@ class XGBClassifier(xgb.XGBClassifier):
         client = default_client()
         class_probs = predict(client, self._Booster, X)
         if class_probs.ndim > 1:
-            if isinstance(X, da.Array):
-                cidx = da.argmax(class_probs, axis=1)
-            else:
-                cidx = X.map_partitions(
-                    lambda partition: np.argmax(partition.values, axis=1)
-                )
+            cidx = da.argmax(class_probs, axis=1)
         else:
             cidx = (class_probs > 0).astype(np.int64)
         return cidx

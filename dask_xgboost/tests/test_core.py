@@ -286,7 +286,8 @@ def test_dask_search_cv(loop):  # noqa
         with Client(s['address'], loop=loop):
             model_selection = pytest.importorskip('dask_ml.model_selection')
             est = dxgb.XGBClassifier()
-            cv = model_selection.RandomizedSearchCV(est, {'max_depth': [1, 10]})
+            cv = model_selection.RandomizedSearchCV(est,
+                                                    {'max_depth': [1, 10]})
             dX = da.from_array(X, 5)
             dy = da.from_array(y, 5)
             cv.fit(dX, dy)

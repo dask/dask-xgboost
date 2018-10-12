@@ -16,6 +16,7 @@ from distributed.utils_test import gen_cluster, loop, cluster  # noqa
 
 import dask_xgboost as dxgb
 
+
 # Workaround for conflict with distributed 1.23.0
 # https://github.com/dask/dask-xgboost/pull/27#issuecomment-417474734
 from concurrent.futures import ThreadPoolExecutor
@@ -32,6 +33,7 @@ param = {'max_depth': 2, 'eta': 1, 'silent': 1, 'objective': 'binary:logistic'}
 
 X = df.values
 y = labels.values
+weight = np.random.rand(10)
 
 
 def test_classifier(loop):  # noqa
@@ -40,11 +42,12 @@ def test_classifier(loop):  # noqa
             a = dxgb.XGBClassifier()
             X2 = da.from_array(X, 5)
             y2 = da.from_array(y, 5)
-            a.fit(X2, y2)
+            weight1 = da.from_array(weight, 5)
+            a.fit(X2, y2, sample_weight=weight1)
             p1 = a.predict(X2)
 
     b = xgb.XGBClassifier()
-    b.fit(X, y)
+    b.fit(X, y, sample_weight=weight)
     np.testing.assert_array_almost_equal(a.feature_importances_,
                                          b.feature_importances_)
     assert_eq(p1, b.predict(X))
@@ -125,11 +128,15 @@ def test_regressor(loop):  # noqa
             a = dxgb.XGBRegressor()
             X2 = da.from_array(X, 5)
             y2 = da.from_array(y, 5)
-            a.fit(X2, y2)
+            weight1 = da.from_array(weight, 5)
+            a.fit(X2, y2, sample_weight=weight1)
             p1 = a.predict(X2)
 
     b = xgb.XGBRegressor()
-    b.fit(X, y)
+    b.fit(X, y, sample_weight=weight)
+
+    np.testing.assert_array_almost_equal(a.feature_importances_,
+                                         b.feature_importances_)
     assert_eq(p1, b.predict(X))
 
 
@@ -163,7 +170,7 @@ def test_dmatrix_kwargs(c, s, a, b):
     xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2))
     dy = da.from_array(y, chunks=(2,))
-    dbst = yield dxgb.train(c, param, dX, dy, {"missing": 0.0})
+    dbst = yield dxgb.train(c, param, dX, dy, dmatrix_kwargs={"missing": 0.0})
 
     # Distributed model matches local model with dmatrix kwargs
     dtrain = xgb.DMatrix(X, label=y, missing=0.0)

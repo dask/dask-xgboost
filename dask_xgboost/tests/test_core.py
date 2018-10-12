@@ -10,9 +10,8 @@ import dask
 import dask.array as da
 from dask.array.utils import assert_eq
 import dask.dataframe as dd
-from dask.distributed import Client
 from sklearn.datasets import load_iris
-from distributed.utils_test import gen_cluster, loop, cluster  # noqa
+from distributed.utils_test import gen_cluster, client  # noqa: F401
 
 import dask_xgboost as dxgb
 
@@ -34,14 +33,12 @@ X = df.values
 y = labels.values
 
 
-def test_classifier(loop):  # noqa
-    with cluster() as (s, [a, b]):
-        with Client(s['address'], loop=loop):
-            a = dxgb.XGBClassifier()
-            X2 = da.from_array(X, 5)
-            y2 = da.from_array(y, 5)
-            a.fit(X2, y2)
-            p1 = a.predict(X2)
+def test_classifier(client):  # noqa
+    a = dxgb.XGBClassifier()
+    X2 = da.from_array(X, 5)
+    y2 = da.from_array(y, 5)
+    a.fit(X2, y2)
+    p1 = a.predict(X2)
 
     b = xgb.XGBClassifier()
     b.fit(X, y)
@@ -50,7 +47,7 @@ def test_classifier(loop):  # noqa
     assert_eq(p1, b.predict(X))
 
 
-def test_multiclass_classifier(loop):  # noqa
+def test_multiclass_classifier(client):  # noqa
     # data
     iris = load_iris()
     X, y = iris.data, iris.target
@@ -67,23 +64,21 @@ def test_multiclass_classifier(loop):  # noqa
     c = xgb.XGBClassifier()  # frame
     d = dxgb.XGBClassifier()
 
-    with cluster() as (s, [_, _]):
-        with Client(s['address'], loop=loop):
-            # fit
-            a.fit(X, y)  # array
-            b.fit(dX, dy, classes=[0, 1, 2])
-            c.fit(df, labels)  # frame
-            d.fit(ddf, dlabels, classes=[0, 1, 2])
+    # fit
+    a.fit(X, y)  # array
+    b.fit(dX, dy, classes=[0, 1, 2])
+    c.fit(df, labels)  # frame
+    d.fit(ddf, dlabels, classes=[0, 1, 2])
 
-            # check
-            da.utils.assert_eq(a.predict(X), b.predict(dX))
-            da.utils.assert_eq(a.predict_proba(X), b.predict_proba(dX))
-            da.utils.assert_eq(c.predict(df), d.predict(ddf))
-            da.utils.assert_eq(c.predict_proba(df), d.predict_proba(ddf))
+    # check
+    da.utils.assert_eq(a.predict(X), b.predict(dX))
+    da.utils.assert_eq(a.predict_proba(X), b.predict_proba(dX))
+    da.utils.assert_eq(c.predict(df), d.predict(ddf))
+    da.utils.assert_eq(c.predict_proba(df), d.predict_proba(ddf))
 
 
 @pytest.mark.parametrize("kind", ['array', 'dataframe'])  # noqa
-def test_classifier_multi(kind, loop):
+def test_classifier_multi(kind, client):
 
     if kind == 'array':
         X2 = da.from_array(X, 5)
@@ -95,38 +90,34 @@ def test_classifier_multi(kind, loop):
         X2 = dd.from_pandas(df, npartitions=2)
         y2 = dd.from_pandas(labels, npartitions=2)
 
-    with cluster() as (s, [a, b]):
-        with Client(s['address'], loop=loop):
-            a = dxgb.XGBClassifier(num_class=3, n_estimators=10,
-                                   objective="multi:softprob")
-            a.fit(X2, y2)
-            p1 = a.predict(X2)
+    a = dxgb.XGBClassifier(num_class=3, n_estimators=10,
+                           objective="multi:softprob")
+    a.fit(X2, y2)
+    p1 = a.predict(X2)
 
-            assert dask.is_dask_collection(p1)
+    assert dask.is_dask_collection(p1)
 
-            if kind == 'array':
-                assert p1.shape == (10,)
+    if kind == 'array':
+        assert p1.shape == (10,)
 
-            result = p1.compute()
-            assert result.shape == (10,)
+    result = p1.compute()
+    assert result.shape == (10,)
 
-            # proba
-            p2 = a.predict_proba(X2)
-            assert dask.is_dask_collection(p2)
+    # proba
+    p2 = a.predict_proba(X2)
+    assert dask.is_dask_collection(p2)
 
-            if kind == 'array':
-                assert p2.shape == (10, 3)
-            assert p2.compute().shape == (10, 3)
+    if kind == 'array':
+        assert p2.shape == (10, 3)
+    assert p2.compute().shape == (10, 3)
 
 
-def test_regressor(loop):  # noqa
-    with cluster() as (s, [a, b]):
-        with Client(s['address'], loop=loop):
-            a = dxgb.XGBRegressor()
-            X2 = da.from_array(X, 5)
-            y2 = da.from_array(y, 5)
-            a.fit(X2, y2)
-            p1 = a.predict(X2)
+def test_regressor(client):  # noqa
+    a = dxgb.XGBRegressor()
+    X2 = da.from_array(X, 5)
+    y2 = da.from_array(y, 5)
+    a.fit(X2, y2)
+    p1 = a.predict(X2)
 
     b = xgb.XGBRegressor()
     b.fit(X, y)
@@ -237,24 +228,21 @@ def test_sparse(c, s, a, b):
     _test_container(dbst, predictions_result, sparse.COO)
 
 
-def test_synchronous_api(loop):  # noqa
+def test_synchronous_api(client):  # noqa
     dtrain = xgb.DMatrix(df, label=labels)
     bst = xgb.train(param, dtrain)
 
     ddf = dd.from_pandas(df, npartitions=4)
     dlabels = dd.from_pandas(labels, npartitions=4)
 
-    with cluster() as (s, [a, b]):
-        with Client(s['address'], loop=loop) as c:
+    dbst = dxgb.train(client, param, ddf, dlabels)
 
-            dbst = dxgb.train(c, param, ddf, dlabels)
+    result = bst.predict(dtrain)
+    dresult = dbst.predict(dtrain)
 
-            result = bst.predict(dtrain)
-            dresult = dbst.predict(dtrain)
-
-            correct = (result > 0.5) == labels
-            dcorrect = (dresult > 0.5) == labels
-            assert dcorrect.sum() >= correct.sum()
+    correct = (result > 0.5) == labels
+    dcorrect = (dresult > 0.5) == labels
+    assert dcorrect.sum() >= correct.sum()
 
 
 @gen_cluster(client=True, timeout=None, check_new_threads=False)

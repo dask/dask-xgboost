@@ -1,3 +1,5 @@
+from unittest.mock import Mock
+
 import numpy as np
 import pandas as pd
 import xgboost as xgb
@@ -36,7 +38,37 @@ y = labels.values
 weight = np.random.rand(10)
 
 
-def test_classifier(loop):  # noqa
+@pytest.yield_fixture(scope="function")
+def xgboost_loop(loop, monkeypatch):
+    xgb.rabit.init()
+    fake_xgb = xgb
+
+    init_mock = Mock()
+    fake_xgb.rabit.init = init_mock
+    finalize_mock = Mock()
+    fake_xgb.rabit.finalize = finalize_mock
+
+    monkeypatch.setattr(dxgb.core, 'xgb', fake_xgb)
+    yield loop, init_mock, finalize_mock
+    xgb.rabit.finalize()
+
+
+@pytest.yield_fixture(scope="function")
+def xgboost_gen_cluster():
+    xgb.rabit.init()
+    yield
+    xgb.rabit.finalize()
+
+
+def xgboost_fixture_deco(func):  # this decoration adds another layer over gen_cluster, allows to add fixture to method signature
+    def outer_wrapper(xgboost_gen_cluster):
+        wrapper = gen_cluster(client=True, timeout=None, check_new_threads=False)
+        return wrapper(func)
+    return outer_wrapper
+
+
+def test_classifier(xgboost_loop):  # noqa
+    loop, _, _ = xgboost_loop
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop):
             a = dxgb.XGBClassifier()
@@ -53,7 +85,8 @@ def test_classifier(loop):  # noqa
     assert_eq(p1, b.predict(X))
 
 
-def test_multiclass_classifier(loop):  # noqa
+def test_multiclass_classifier(xgboost_loop):  # noqa
+    loop, _, _ = xgboost_loop
     # data
     iris = load_iris()
     X, y = iris.data, iris.target
@@ -86,7 +119,8 @@ def test_multiclass_classifier(loop):  # noqa
 
 
 @pytest.mark.parametrize("kind", ['array', 'dataframe'])  # noqa
-def test_classifier_multi(kind, loop):
+def test_classifier_multi(kind, xgboost_loop):
+    loop, _, _ = xgboost_loop
 
     if kind == 'array':
         X2 = da.from_array(X, 5)
@@ -122,7 +156,8 @@ def test_classifier_multi(kind, loop):
             assert p2.compute().shape == (10, 3)
 
 
-def test_regressor(loop):  # noqa
+def test_regressor(xgboost_loop):  # noqa
+    loop, _, _ = xgboost_loop
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop):
             a = dxgb.XGBRegressor()
@@ -165,9 +200,8 @@ def test_basic(c, s, a, b):
     assert ((predictions > 0.5) != labels).sum() < 2
 
 
-@gen_cluster(client=True, timeout=None, check_new_threads=False)
+@xgboost_fixture_deco
 def test_dmatrix_kwargs(c, s, a, b):
-    xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2))
     dy = da.from_array(y, chunks=(2,))
     dbst = yield dxgb.train(c, param, dX, dy, dmatrix_kwargs={"missing": 0.0})
@@ -200,9 +234,8 @@ def _test_container(dbst, predictions, X_type):
     assert ((predictions > 0.5) != labels).sum() < 2
 
 
-@gen_cluster(client=True, timeout=None, check_new_threads=False)
-def test_numpy(c, s, a, b):
-    xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
+@xgboost_fixture_deco
+def test_numpy(c, s, a, b, deco_fixture):
     dX = da.from_array(X, chunks=(2, 2))
     dy = da.from_array(y, chunks=(2,))
     dbst = yield dxgb.train(c, param, dX, dy)
@@ -214,9 +247,8 @@ def test_numpy(c, s, a, b):
     _test_container(dbst, predictions, np.array)
 
 
-@gen_cluster(client=True, timeout=None, check_new_threads=False)
+@xgboost_fixture_deco
 def test_scipy_sparse(c, s, a, b):
-    xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2)).map_blocks(scipy.sparse.csr_matrix)
     dy = da.from_array(y, chunks=(2,))
     dbst = yield dxgb.train(c, param, dX, dy)
@@ -229,9 +261,8 @@ def test_scipy_sparse(c, s, a, b):
     _test_container(dbst, predictions_result, scipy.sparse.csr_matrix)
 
 
-@gen_cluster(client=True, timeout=None, check_new_threads=False)
+@xgboost_fixture_deco
 def test_sparse(c, s, a, b):
-    xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2)).map_blocks(sparse.COO)
     dy = da.from_array(y, chunks=(2,))
     dbst = yield dxgb.train(c, param, dX, dy)

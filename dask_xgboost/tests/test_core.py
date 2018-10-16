@@ -38,7 +38,7 @@ y = labels.values
 weight = np.random.rand(10)
 
 
-@pytest.yield_fixture(scope="function")
+@pytest.yield_fixture(scope="function")  # noqa
 def xgboost_loop(loop, monkeypatch):
     xgb.rabit.init()
     fake_xgb = xgb
@@ -49,7 +49,7 @@ def xgboost_loop(loop, monkeypatch):
     fake_xgb.rabit.finalize = finalize_mock
 
     monkeypatch.setattr(dxgb.core, 'xgb', fake_xgb)
-    yield loop, init_mock, finalize_mock
+    yield loop
     xgb.rabit.finalize()
 
 
@@ -60,17 +60,18 @@ def xgboost_gen_cluster():
     xgb.rabit.finalize()
 
 
-def xgboost_fixture_deco(func):  # this decoration adds another layer over gen_cluster, allows to add fixture to method signature
+def xgboost_fixture_deco(func):
+    # this decoration adds another layer over gen_cluster, allows to add fixture
     def outer_wrapper(xgboost_gen_cluster):
-        wrapper = gen_cluster(client=True, timeout=None, check_new_threads=False)
+        wrapper = gen_cluster(client=True, timeout=None,
+                              check_new_threads=False)
         return wrapper(func)
     return outer_wrapper
 
 
 def test_classifier(xgboost_loop):  # noqa
-    loop, _, _ = xgboost_loop
     with cluster() as (s, [a, b]):
-        with Client(s['address'], loop=loop):
+        with Client(s['address'], loop=xgboost_loop):
             a = dxgb.XGBClassifier()
             X2 = da.from_array(X, 5)
             y2 = da.from_array(y, 5)
@@ -86,7 +87,6 @@ def test_classifier(xgboost_loop):  # noqa
 
 
 def test_multiclass_classifier(xgboost_loop):  # noqa
-    loop, _, _ = xgboost_loop
     # data
     iris = load_iris()
     X, y = iris.data, iris.target
@@ -104,7 +104,7 @@ def test_multiclass_classifier(xgboost_loop):  # noqa
     d = dxgb.XGBClassifier()
 
     with cluster() as (s, [_, _]):
-        with Client(s['address'], loop=loop):
+        with Client(s['address'], loop=xgboost_loop):
             # fit
             a.fit(X, y)  # array
             b.fit(dX, dy, classes=[0, 1, 2])
@@ -120,8 +120,6 @@ def test_multiclass_classifier(xgboost_loop):  # noqa
 
 @pytest.mark.parametrize("kind", ['array', 'dataframe'])  # noqa
 def test_classifier_multi(kind, xgboost_loop):
-    loop, _, _ = xgboost_loop
-
     if kind == 'array':
         X2 = da.from_array(X, 5)
         y2 = da.from_array(
@@ -133,7 +131,7 @@ def test_classifier_multi(kind, xgboost_loop):
         y2 = dd.from_pandas(labels, npartitions=2)
 
     with cluster() as (s, [a, b]):
-        with Client(s['address'], loop=loop):
+        with Client(s['address'], loop=xgboost_loop):
             a = dxgb.XGBClassifier(num_class=3, n_estimators=10,
                                    objective="multi:softprob")
             a.fit(X2, y2)
@@ -157,9 +155,8 @@ def test_classifier_multi(kind, xgboost_loop):
 
 
 def test_regressor(xgboost_loop):  # noqa
-    loop, _, _ = xgboost_loop
     with cluster() as (s, [a, b]):
-        with Client(s['address'], loop=loop):
+        with Client(s['address'], loop=xgboost_loop):
             a = dxgb.XGBRegressor()
             X2 = da.from_array(X, 5)
             y2 = da.from_array(y, 5)
@@ -235,7 +232,7 @@ def _test_container(dbst, predictions, X_type):
 
 
 @xgboost_fixture_deco
-def test_numpy(c, s, a, b, deco_fixture):
+def test_numpy(c, s, a, b):
     dX = da.from_array(X, chunks=(2, 2))
     dy = da.from_array(y, chunks=(2,))
     dbst = yield dxgb.train(c, param, dX, dy)

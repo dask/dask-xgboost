@@ -106,7 +106,8 @@ def train_part(env, param, list_of_parts, dmatrix_kwargs=None, **kwargs):
 
 
 @gen.coroutine
-def _train(client, params, data, labels, sample_weight, dmatrix_kwargs={}, **kwargs):
+def _train(client, params, data, labels,
+           sample_weight, dmatrix_kwargs={}, **kwargs):
     """
     Asynchronous version of train
 

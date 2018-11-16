@@ -18,6 +18,7 @@ from dask import delayed
 from dask.distributed import wait, default_client
 import dask.dataframe as dd
 import dask.array as da
+from dask.dataframe.multi import align_partitions
 
 import xgboost as xgb
 
@@ -107,6 +108,10 @@ def _train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
     --------
     train
     """
+    # Dask DataFrames need to have the same partition lengths
+    if isinstance(data, dd._Frame) and isinstance(labels, dd._Frame):
+        data, labels = align_partitions(data, labels)[0]
+
     # Break apart Dask.array/dataframe into chunks/parts
     data_parts = data.to_delayed()
     label_parts = labels.to_delayed()

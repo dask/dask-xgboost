@@ -158,6 +158,15 @@ def test_basic(c, s, a, b):
     assert ((predictions > 0.5) != labels).sum() < 2
 
 
+def test_unequal_df_partition_lengths(loop):  # noqa
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop):
+            X = dd.from_pandas(df, chunksize=5)
+            y = dd.from_pandas(labels, chunksize=6)
+            clf = dxgb.XGBClassifier()
+            clf.fit(X, y)
+
+
 @gen_cluster(client=True, timeout=None, check_new_threads=False)
 def test_dmatrix_kwargs(c, s, a, b):
     xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"

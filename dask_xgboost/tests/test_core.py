@@ -15,6 +15,7 @@ from sklearn.datasets import load_iris
 from distributed.utils_test import gen_cluster, loop, cluster  # noqa
 
 import dask_xgboost as dxgb
+from dask_xgboost.core import align_training_data
 
 # Workaround for conflict with distributed 1.23.0
 # https://github.com/dask/dask-xgboost/pull/27#issuecomment-417474734
@@ -158,6 +159,23 @@ def test_basic(c, s, a, b):
     assert ((predictions > 0.5) != labels).sum() < 2
 
 
+@pytest.mark.parametrize('X, y', [    # noqa
+    (dd.from_pandas(df, chunksize=5),
+     dd.from_pandas(labels, chunksize=6)),
+    (dd.from_pandas(df, chunksize=5).values,
+     dd.from_pandas(labels, chunksize=6)),
+    (dd.from_pandas(df, chunksize=5),
+     dd.from_pandas(labels, chunksize=6).values),
+    (dd.from_pandas(df, chunksize=5).values,
+     dd.from_pandas(labels, chunksize=6).values),
+])
+def test_unequal_partition_lengths(loop, X, y):  # noqa
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop):
+            clf = dxgb.XGBClassifier()
+            clf.fit(X, y)
+
+
 @gen_cluster(client=True, timeout=None, check_new_threads=False)
 def test_dmatrix_kwargs(c, s, a, b):
     xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
@@ -269,3 +287,38 @@ def test_errors(c, s, a, b):
         yield dxgb.train(c, param, df, df.x)
 
     assert 'foo' in str(info.value)
+
+
+def test_align_training_data_dataframe(loop):  # noqa
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as client:
+            X = dd.from_pandas(df, chunksize=5)
+            y = dd.from_pandas(labels, chunksize=6)
+
+            X_partition_lengths = tuple(X.map_partitions(len).compute())
+            y_partition_lengths = tuple(y.map_partitions(len).compute())
+            assert X_partition_lengths != y_partition_lengths
+
+            X_align, y_align = align_training_data(client, X, y)
+            assert isinstance(X_align, dd._Frame)
+            assert isinstance(y_align, dd._Frame)
+
+            X_partition_lengths = tuple(X_align.map_partitions(len).compute())
+            y_partition_lengths = tuple(y_align.map_partitions(len).compute())
+            assert X_partition_lengths == y_partition_lengths
+
+
+@pytest.mark.parametrize('equal_partitions', [True, False])  # noqa
+def test_align_training_data_rechunk(loop, equal_partitions):  # noqa
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as client:
+            X = dd.from_pandas(df, chunksize=5)
+            if equal_partitions:
+                y = dd.from_pandas(labels, chunksize=5)
+            else:
+                y = dd.from_pandas(labels, chunksize=6)
+
+            X_align, y_align = align_training_data(client, X, y)
+            assert X_align is X
+            if equal_partitions:
+                assert y_align is y

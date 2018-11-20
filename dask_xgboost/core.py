@@ -14,6 +14,7 @@ except ImportError:
     sparse = False
     ss = False
 
+import dask
 from dask import delayed
 from dask.distributed import wait, default_client
 import dask.dataframe as dd
@@ -107,6 +108,7 @@ def _train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
     --------
     train
     """
+
     # Break apart Dask.array/dataframe into chunks/parts
     data_parts = data.to_delayed()
     label_parts = labels.to_delayed()
@@ -158,6 +160,58 @@ def _train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
     raise gen.Return(result)
 
 
+def compute_array_chunks(arr):
+    assert isinstance(arr, da.Array)
+    parts = arr.to_delayed()
+    if isinstance(parts, np.ndarray):
+        parts = parts.flatten().tolist()
+    chunks = tuple([part.shape[0].compute() for part in parts])
+    return chunks
+
+
+def align_training_data(client, data, labels):
+    """Aligns training data and labels
+
+    Parameters
+    ----------
+    client: dask.distributed.Client
+    data: dask Array or dask DataFrame
+        Training features
+    labels: dask Array or dask DataFrame
+        Training target
+
+    Returns
+    -------
+    data : dask Array or dask DataFrame
+    labels : dask Array or dask DataFrame
+    """
+    with dask.config.set(scheduler=client):
+        # Compute data chunk/partition sizes
+        if isinstance(data, dd._Frame):
+            data_chunks = tuple(data.map_partitions(len).compute())
+        elif isinstance(data, da.Array):
+            if any(np.isnan(sum(c)) for c in data.chunks):
+                data_chunks = compute_array_chunks(data)
+            else:
+                data_chunks = data.chunks[0]
+
+        # Re-chunk/partition labels to match data
+        # Only rechunk if there is a size mismatch betwen data and labels
+        if isinstance(labels, dd._Frame):
+            labels_arr = labels.to_dask_array(lengths=True)
+            if labels_arr.chunks != (data_chunks,):
+                labels_arr = labels_arr.rechunk({0: data_chunks})
+                labels = labels_arr.to_dask_dataframe()
+        elif isinstance(labels, da.Array):
+            if any(np.isnan(sum(c)) for c in labels.chunks):
+                labels_chunks = compute_array_chunks(labels)
+                labels._chunks = (labels_chunks,)
+            if labels.chunks != data_chunks:
+                labels = labels.rechunk({0: data_chunks})
+
+    return data, labels
+
+
 def train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
     """ Train an XGBoost model on a Dask Cluster
 
@@ -187,6 +241,7 @@ def train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
     --------
     predict
     """
+    data, labels = align_training_data(client, data, labels)
     return client.sync(_train, client, params, data,
                        labels, dmatrix_kwargs, **kwargs)
 

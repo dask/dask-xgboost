@@ -269,3 +269,10 @@ def test_errors(c, s, a, b):
         yield dxgb.train(c, param, df, df.x)
 
     assert 'foo' in str(info.value)
+
+
+def test_predict_type_error():
+    with pytest.raises(TypeError) as info:
+        dxgb.predict(None, None, 'foo')
+    assert 'foo' in str(info.value)
+    assert 'dask array' in str(info.value).lower()

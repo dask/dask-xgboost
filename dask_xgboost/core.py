@@ -252,6 +252,11 @@ def predict(client, model, data):
         result = data.map_blocks(_predict_part, model=model,
                                  dtype=np.float32,
                                  **kwargs)
+    else:
+        raise TypeError(
+            "Got unexpected input type %s, expected Dask array or dataframe"
+            % str(data)
+        )
 
     return result
 

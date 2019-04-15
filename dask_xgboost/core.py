@@ -12,7 +12,7 @@ from dask.distributed import default_client, wait
 from toolz import assoc, first
 from tornado import gen
 
-from .tracker import RabitTracker
+from .tracker import RabitTracker, get_host_ip
 
 try:
     import sparse
@@ -35,6 +35,8 @@ def parse_host_port(address):
 
 def start_tracker(host, n_workers):
     """ Start Rabit tracker """
+    if host is None:
+        host = get_host_ip('auto')
     env = {"DMLC_NUM_WORKER": n_workers}
     rabit = RabitTracker(hostIP=host, nslave=n_workers)
     env.update(rabit.slave_envs())
@@ -116,6 +118,7 @@ def train_part(
             result = None
             evals_result = None
     finally:
+        logger.info("Finalizing Rabit, Rank %d", xgb.rabit.get_rank())
         xgb.rabit.finalize()
     return result, evals_result
 
@@ -205,10 +208,9 @@ def _train(
     ncores = yield client.scheduler.ncores()  # Number of cores per worker
 
     # Start the XGBoost tracker on the Dask scheduler
-    host, port = parse_host_port(client.scheduler.address)
-    env = yield client._run_on_scheduler(
-        start_tracker, host.strip("/:"), len(worker_map)
-    )
+    env = yield client._run_on_scheduler(start_tracker,
+                                         None,
+                                         len(worker_map))
 
     # Tell each worker to train on the chunks/parts that it has locally
     futures = [

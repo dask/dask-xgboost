@@ -1,3 +1,5 @@
+from unittest.mock import Mock
+
 import numpy as np
 import pandas as pd
 import xgboost as xgb
@@ -16,6 +18,7 @@ from distributed.utils_test import gen_cluster, loop, cluster  # noqa
 
 import dask_xgboost as dxgb
 
+
 # Workaround for conflict with distributed 1.23.0
 # https://github.com/dask/dask-xgboost/pull/27#issuecomment-417474734
 from concurrent.futures import ThreadPoolExecutor
@@ -32,25 +35,58 @@ param = {'max_depth': 2, 'eta': 1, 'silent': 1, 'objective': 'binary:logistic'}
 
 X = df.values
 y = labels.values
+weight = np.random.rand(10)
 
 
-def test_classifier(loop):  # noqa
+@pytest.yield_fixture(scope="function")  # noqa
+def xgboost_loop(loop, monkeypatch):
+    xgb.rabit.init()
+    fake_xgb = xgb
+
+    init_mock = Mock()
+    fake_xgb.rabit.init = init_mock
+    finalize_mock = Mock()
+    fake_xgb.rabit.finalize = finalize_mock
+
+    monkeypatch.setattr(dxgb.core, 'xgb', fake_xgb)
+    yield loop
+    xgb.rabit.finalize()
+
+
+@pytest.yield_fixture(scope="function")
+def xgboost_gen_cluster():
+    xgb.rabit.init()
+    yield
+    xgb.rabit.finalize()
+
+
+def xgboost_fixture_deco(func):
+    # this decoration adds another layer over gen_cluster, allows to add fixture
+    def outer_wrapper(xgboost_gen_cluster):
+        wrapper = gen_cluster(client=True, timeout=None,
+                              check_new_threads=False)
+        return wrapper(func)
+    return outer_wrapper
+
+
+def test_classifier(xgboost_loop):  # noqa
     with cluster() as (s, [a, b]):
-        with Client(s['address'], loop=loop):
+        with Client(s['address'], loop=xgboost_loop):
             a = dxgb.XGBClassifier()
             X2 = da.from_array(X, 5)
             y2 = da.from_array(y, 5)
-            a.fit(X2, y2)
+            weight1 = da.from_array(weight, 5)
+            a.fit(X2, y2, sample_weight=weight1)
             p1 = a.predict(X2)
 
     b = xgb.XGBClassifier()
-    b.fit(X, y)
+    b.fit(X, y, sample_weight=weight)
     np.testing.assert_array_almost_equal(a.feature_importances_,
                                          b.feature_importances_)
     assert_eq(p1, b.predict(X))
 
 
-def test_multiclass_classifier(loop):  # noqa
+def test_multiclass_classifier(xgboost_loop):  # noqa
     # data
     iris = load_iris()
     X, y = iris.data, iris.target
@@ -68,7 +104,7 @@ def test_multiclass_classifier(loop):  # noqa
     d = dxgb.XGBClassifier()
 
     with cluster() as (s, [_, _]):
-        with Client(s['address'], loop=loop):
+        with Client(s['address'], loop=xgboost_loop):
             # fit
             a.fit(X, y)  # array
             b.fit(dX, dy, classes=[0, 1, 2])
@@ -83,8 +119,7 @@ def test_multiclass_classifier(loop):  # noqa
 
 
 @pytest.mark.parametrize("kind", ['array', 'dataframe'])  # noqa
-def test_classifier_multi(kind, loop):
-
+def test_classifier_multi(kind, xgboost_loop):
     if kind == 'array':
         X2 = da.from_array(X, 5)
         y2 = da.from_array(
@@ -96,7 +131,7 @@ def test_classifier_multi(kind, loop):
         y2 = dd.from_pandas(labels, npartitions=2)
 
     with cluster() as (s, [a, b]):
-        with Client(s['address'], loop=loop):
+        with Client(s['address'], loop=xgboost_loop):
             a = dxgb.XGBClassifier(num_class=3, n_estimators=10,
                                    objective="multi:softprob")
             a.fit(X2, y2)
@@ -119,17 +154,21 @@ def test_classifier_multi(kind, loop):
             assert p2.compute().shape == (10, 3)
 
 
-def test_regressor(loop):  # noqa
+def test_regressor(xgboost_loop):  # noqa
     with cluster() as (s, [a, b]):
-        with Client(s['address'], loop=loop):
+        with Client(s['address'], loop=xgboost_loop):
             a = dxgb.XGBRegressor()
             X2 = da.from_array(X, 5)
             y2 = da.from_array(y, 5)
-            a.fit(X2, y2)
+            weight1 = da.from_array(weight, 5)
+            a.fit(X2, y2, sample_weight=weight1)
             p1 = a.predict(X2)
 
     b = xgb.XGBRegressor()
-    b.fit(X, y)
+    b.fit(X, y, sample_weight=weight)
+
+    np.testing.assert_array_almost_equal(a.feature_importances_,
+                                         b.feature_importances_)
     assert_eq(p1, b.predict(X))
 
 
@@ -158,12 +197,11 @@ def test_basic(c, s, a, b):
     assert ((predictions > 0.5) != labels).sum() < 2
 
 
-@gen_cluster(client=True, timeout=None, check_new_threads=False)
+@xgboost_fixture_deco
 def test_dmatrix_kwargs(c, s, a, b):
-    xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2))
     dy = da.from_array(y, chunks=(2,))
-    dbst = yield dxgb.train(c, param, dX, dy, {"missing": 0.0})
+    dbst = yield dxgb.train(c, param, dX, dy, dmatrix_kwargs={"missing": 0.0})
 
     # Distributed model matches local model with dmatrix kwargs
     dtrain = xgb.DMatrix(X, label=y, missing=0.0)
@@ -193,9 +231,8 @@ def _test_container(dbst, predictions, X_type):
     assert ((predictions > 0.5) != labels).sum() < 2
 
 
-@gen_cluster(client=True, timeout=None, check_new_threads=False)
+@xgboost_fixture_deco
 def test_numpy(c, s, a, b):
-    xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2))
     dy = da.from_array(y, chunks=(2,))
     dbst = yield dxgb.train(c, param, dX, dy)
@@ -207,9 +244,8 @@ def test_numpy(c, s, a, b):
     _test_container(dbst, predictions, np.array)
 
 
-@gen_cluster(client=True, timeout=None, check_new_threads=False)
+@xgboost_fixture_deco
 def test_scipy_sparse(c, s, a, b):
-    xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2)).map_blocks(scipy.sparse.csr_matrix)
     dy = da.from_array(y, chunks=(2,))
     dbst = yield dxgb.train(c, param, dX, dy)
@@ -222,9 +258,8 @@ def test_scipy_sparse(c, s, a, b):
     _test_container(dbst, predictions_result, scipy.sparse.csr_matrix)
 
 
-@gen_cluster(client=True, timeout=None, check_new_threads=False)
+@xgboost_fixture_deco
 def test_sparse(c, s, a, b):
-    xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2)).map_blocks(sparse.COO)
     dy = da.from_array(y, chunks=(2,))
     dbst = yield dxgb.train(c, param, dX, dy)

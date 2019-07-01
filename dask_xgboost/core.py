@@ -73,14 +73,21 @@ def train_part(env, param, list_of_parts, dmatrix_kwargs=None, **kwargs):
     -------
     model if rank zero, None otherwise
     """
-    data, labels = zip(*list_of_parts)  # Prepare data
+    # Prepare data
+    if len(list_of_parts[0]) == 3:
+        data, labels, weight = zip(*list_of_parts)
+        weight = concat(weight)
+    else:
+        data, labels = zip(*list_of_parts)
+        weight = None
+
     data = concat(data)                 # Concatenate many parts into one
     labels = concat(labels)
     if dmatrix_kwargs is None:
         dmatrix_kwargs = {}
 
     dmatrix_kwargs["feature_names"] = getattr(data, 'columns', None)
-    dtrain = xgb.DMatrix(data, labels, **dmatrix_kwargs)
+    dtrain = xgb.DMatrix(data, labels, weight=weight, **dmatrix_kwargs)
 
     args = [('%s=%s' % item).encode() for item in env.items()]
     xgb.rabit.init(args)
@@ -99,7 +106,8 @@ def train_part(env, param, list_of_parts, dmatrix_kwargs=None, **kwargs):
 
 
 @gen.coroutine
-def _train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
+def _train(client, params, data, labels,
+           sample_weight, dmatrix_kwargs={}, **kwargs):
     """
     Asynchronous version of train
 
@@ -117,8 +125,18 @@ def _train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
         assert label_parts.ndim == 1 or label_parts.shape[1] == 1
         label_parts = label_parts.flatten().tolist()
 
-    # Arrange parts into pairs.  This enforces co-locality
-    parts = list(map(delayed, zip(data_parts, label_parts)))
+    if sample_weight is not None:
+        sample_weight_parts = sample_weight.to_delayed()
+        if isinstance(sample_weight_parts, np.ndarray):
+            assert sample_weight_parts.ndim == 1 or sample_weight_parts.shape[1] == 1
+            sample_weight_parts = sample_weight_parts.flatten().tolist()
+
+        # Arrange parts into pairs.  This enforces co-locality
+        parts = list(map(delayed, zip(data_parts, label_parts, sample_weight_parts)))
+    else:
+        # Arrange parts into pairs.  This enforces co-locality
+        parts = list(map(delayed, zip(data_parts, label_parts)))
+
     parts = client.compute(parts)  # Start computation in the background
     yield wait(parts)
 
@@ -158,7 +176,7 @@ def _train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
     raise gen.Return(result)
 
 
-def train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
+def train(client, params, data, labels, sample_weight=None, dmatrix_kwargs={}, **kwargs):
     """ Train an XGBoost model on a Dask Cluster
 
     This starts XGBoost on all Dask workers, moves input data to those workers,
@@ -188,7 +206,7 @@ def train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
     predict
     """
     return client.sync(_train, client, params, data,
-                       labels, dmatrix_kwargs, **kwargs)
+                       labels, sample_weight, dmatrix_kwargs, **kwargs)
 
 
 def _predict_part(part, model=None):
@@ -258,7 +276,7 @@ def predict(client, model, data):
 
 class XGBRegressor(xgb.XGBRegressor):
 
-    def fit(self, X, y=None):
+    def fit(self, X, y=None, sample_weight=None):
         """Fit the gradient boosting model
 
         Parameters
@@ -279,6 +297,7 @@ class XGBRegressor(xgb.XGBRegressor):
         client = default_client()
         xgb_options = self.get_xgb_params()
         self._Booster = train(client, xgb_options, X, y,
+                              sample_weight,
                               num_boost_round=self.n_estimators)
         return self
 
@@ -289,7 +308,7 @@ class XGBRegressor(xgb.XGBRegressor):
 
 class XGBClassifier(xgb.XGBClassifier):
 
-    def fit(self, X, y=None, classes=None):
+    def fit(self, X, y=None, classes=None, sample_weight=None):
         """Fit a gradient boosting classifier
 
         Parameters
@@ -301,6 +320,8 @@ class XGBClassifier(xgb.XGBClassifier):
         classes : sequence, optional
             The unique values in `y`. If no specified, this will be
             eagerly computed from `y` before training.
+        sample_weight : array-line [n_samples]
+            Weights for each traning sample
 
         Returns
         -------
@@ -345,9 +366,9 @@ class XGBClassifier(xgb.XGBClassifier):
 
         # TODO: auto label-encode y
         # that will require a dependency on dask-ml
-        # TODO: sample weight
 
         self._Booster = train(client, xgb_options, X, y,
+                              sample_weight,
                               num_boost_round=self.n_estimators)
         return self
 

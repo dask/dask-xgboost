@@ -225,7 +225,7 @@ def test_scipy_sparse(c, s, a, b):
 @gen_cluster(client=True, timeout=None)
 def test_sparse(c, s, a, b):
     xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
-    dX = da.from_array(X, chunks=(2, 2)).map_blocks(sparse.COO)
+    dX = da.from_array(X, chunks=(2, 2)).map_blocks(scipy.sparse.csr_matrix)
     dy = da.from_array(y, chunks=(2,))
     dbst = yield dxgb.train(c, param, dX, dy)
     dbst = yield dxgb.train(c, param, dX, dy)  # we can do this twice
@@ -234,7 +234,7 @@ def test_sparse(c, s, a, b):
     assert isinstance(predictions, da.Array)
 
     predictions_result = yield c.compute(predictions)
-    _test_container(dbst, predictions_result, sparse.COO)
+    _test_container(dbst, predictions_result, scipy.sparse.csr_matrix)
 
 
 def test_synchronous_api(loop):  # noqa

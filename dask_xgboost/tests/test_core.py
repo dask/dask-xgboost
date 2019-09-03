@@ -133,7 +133,7 @@ def test_regressor(loop):  # noqa
     assert_eq(p1, b.predict(X))
 
 
-@gen_cluster(client=True, timeout=None, check_new_threads=False)
+@gen_cluster(client=True, timeout=None)
 def test_basic(c, s, a, b):
     dtrain = xgb.DMatrix(df, label=labels)
     bst = xgb.train(param, dtrain)
@@ -158,7 +158,7 @@ def test_basic(c, s, a, b):
     assert ((predictions > 0.5) != labels).sum() < 2
 
 
-@gen_cluster(client=True, timeout=None, check_new_threads=False)
+@gen_cluster(client=True, timeout=None)
 def test_dmatrix_kwargs(c, s, a, b):
     xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2))
@@ -193,7 +193,7 @@ def _test_container(dbst, predictions, X_type):
     assert ((predictions > 0.5) != labels).sum() < 2
 
 
-@gen_cluster(client=True, timeout=None, check_new_threads=False)
+@gen_cluster(client=True, timeout=None)
 def test_numpy(c, s, a, b):
     xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2))
@@ -207,7 +207,7 @@ def test_numpy(c, s, a, b):
     _test_container(dbst, predictions, np.array)
 
 
-@gen_cluster(client=True, timeout=None, check_new_threads=False)
+@gen_cluster(client=True, timeout=None)
 def test_scipy_sparse(c, s, a, b):
     xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2)).map_blocks(scipy.sparse.csr_matrix)
@@ -222,7 +222,7 @@ def test_scipy_sparse(c, s, a, b):
     _test_container(dbst, predictions_result, scipy.sparse.csr_matrix)
 
 
-@gen_cluster(client=True, timeout=None, check_new_threads=False)
+@gen_cluster(client=True, timeout=None)
 def test_sparse(c, s, a, b):
     xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2)).map_blocks(sparse.COO)
@@ -257,7 +257,7 @@ def test_synchronous_api(loop):  # noqa
             assert dcorrect.sum() >= correct.sum()
 
 
-@gen_cluster(client=True, timeout=None, check_new_threads=False)
+@gen_cluster(client=True, timeout=None)
 def test_errors(c, s, a, b):
     def f(part):
         raise Exception('foo')

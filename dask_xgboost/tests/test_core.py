@@ -10,7 +10,8 @@ import dask.array as da
 from dask.array.utils import assert_eq
 import dask.dataframe as dd
 from dask.distributed import Client
-from sklearn.datasets import load_iris
+from sklearn.datasets import load_digits, load_iris
+from sklearn.model_selection import train_test_split
 from distributed.utils_test import gen_cluster, loop, cluster  # noqa
 
 import dask_xgboost as dxgb
@@ -81,6 +82,39 @@ def test_multiclass_classifier(loop):  # noqa
             da.utils.assert_eq(c.predict_proba(df), d.predict_proba(ddf))
 
 
+def test_classifier_early_stopping(loop):
+    # data
+    digits = load_digits(2)
+    X = digits['data']
+    y = digits['target']
+    X_train, X_test, y_train, y_test = train_test_split(X, y,
+                                                        random_state=0)
+
+    dX_train = da.from_array(X_train)
+    dy_train = da.from_array(y_train)
+    dX_test = da.from_array(X_test)
+    dy_test = da.from_array(y_test)
+
+    clf1 = dxgb.XGBClassifier()
+    clf2 = dxgb.XGBClassifier()
+    clf3 = dxgb.XGBClassifier()
+    with cluster() as (s, [_, _]):
+        with Client(s['address'], loop=loop):
+            clf1.fit(dX_train, dy_train, early_stopping_rounds=5, eval_metric="auc",
+                        eval_set=[(dX_test, dy_test)])
+            clf2.fit(dX_train, dy_train, early_stopping_rounds=4, eval_metric="auc",
+                        eval_set=[(dX_test, dy_test)])
+
+            # should be the same
+            assert clf1.best_score == clf2.best_score
+            assert clf1.best_score != 1
+
+            # check overfit
+            clf3.fit(dX_train, dy_train, early_stopping_rounds=10, eval_metric="auc",
+                     eval_set=[(dX_test, dy_test)])
+            assert clf3.best_score == 1
+
+
 @pytest.mark.parametrize("kind", ['array', 'dataframe'])
 def test_classifier_multi(kind, loop):  # noqa: F811
 
@@ -116,7 +150,6 @@ def test_classifier_multi(kind, loop):  # noqa: F811
             if kind == 'array':
                 assert p2.shape == (10, 3)
             assert p2.compute().shape == (10, 3)
-
 
 def test_regressor(loop):  # noqa
     with cluster() as (s, [a, b]):

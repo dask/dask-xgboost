@@ -62,7 +62,8 @@ def concat(L):
                         ". Got %s" % type(L[0]))
 
 
-def train_part(env, param, list_of_parts, dmatrix_kwargs=None, **kwargs):
+def train_part(env, param, list_of_parts, dmatrix_kwargs=None, eval_set=None, 
+               missing=None, n_jobs=None, sample_weight_eval_set=None, **kwargs):
     """
     Run part of XGBoost distributed workload
 
@@ -82,12 +83,25 @@ def train_part(env, param, list_of_parts, dmatrix_kwargs=None, **kwargs):
     dmatrix_kwargs["feature_names"] = getattr(data, 'columns', None)
     dtrain = xgb.DMatrix(data, labels, **dmatrix_kwargs)
 
+    if eval_set is not None:
+        if sample_weight_eval_set is None:
+            sample_weight_eval_set = [None] * len(eval_set)
+        evals = list(
+            xgb.DMatrix(eval_set[i][0].compute(), label=eval_set[i][1].compute(),
+                        missing=missing, weight=sample_weight_eval_set[i], 
+                        nthread=n_jobs)
+            for i in range(len(eval_set)))
+        evals = list(zip(evals, ["validation_{}".format(i) for i in
+                                    range(len(evals))]))
+    else:
+        evals = ()
+
     args = [('%s=%s' % item).encode() for item in env.items()]
     xgb.rabit.init(args)
     try:
         logger.info("Starting Rabit, Rank %d", xgb.rabit.get_rank())
 
-        bst = xgb.train(param, dtrain, **kwargs)
+        bst = xgb.train(param, dtrain, evals=evals, **kwargs)
 
         if xgb.rabit.get_rank() == 0:  # Only return from one worker
             result = bst
@@ -289,7 +303,11 @@ class XGBRegressor(xgb.XGBRegressor):
 
 class XGBClassifier(xgb.XGBClassifier):
 
-    def fit(self, X, y=None, classes=None):
+    def fit(self, X, y=None, classes=None, 
+            sample_weight_eval_set=None, 
+            early_stopping_rounds=None,
+            eval_set=None,
+            eval_metric=None):
         """Fit a gradient boosting classifier
 
         Parameters
@@ -298,6 +316,35 @@ class XGBClassifier(xgb.XGBClassifier):
             Feature Matrix. May be a dask.array or dask.dataframe
         y : array-like
             Labels
+        eval_set : list, optional
+            A list of (X, y) tuple pairs to use as validation sets, for which
+            metrics will be computed.
+            Validation metrics will help us track the performance of the model.
+        sample_weight_eval_set : list, optional
+            A list of the form [L_1, L_2, ..., L_n], where each L_i is a list of
+            instance weights on the i-th validation set.
+        eval_metric : str, list of str, or callable, optional
+            If a str, should be a built-in evaluation metric to use. See
+            doc/parameter.rst.
+            If a list of str, should be the list of multiple built-in evaluation metrics
+            to use.
+            If callable, a custom evaluation metric. The call
+            signature is ``func(y_predicted, y_true)`` where ``y_true`` will be a
+            DMatrix object such that you may need to call the ``get_label``
+            method. It must return a str, value pair where the str is a name
+            for the evaluation and value is the value of the evaluation
+            function. The callable custom objective is always minimized.
+        early_stopping_rounds : int
+            Activates early stopping. Validation metric needs to improve at least once in
+            every **early_stopping_rounds** round(s) to continue training.
+            Requires at least one item in **eval_set**.
+            The method returns the model from the last iteration (not the best one).
+            If there's more than one item in **eval_set**, the last entry will be used
+            for early stopping.
+            If there's more than one metric in **eval_metric**, the last metric will be
+            used for early stopping.
+            If early stopping occurs, the model will have three additional fields:
+            ``clf.best_score``, ``clf.best_iteration`` and ``clf.best_ntree_limit``.
         classes : sequence, optional
             The unique values in `y`. If no specified, this will be
             eagerly computed from `y` before training.
@@ -310,8 +357,7 @@ class XGBClassifier(xgb.XGBClassifier):
         -----
         This differs from the XGBoost version in three ways
 
-        1. The ``sample_weight``, ``eval_set``, ``eval_metric``,
-          ``early_stopping_rounds`` and ``verbose`` fit kwargs are not
+        1. The ``sample_weight`` and ``verbose`` fit kwargs are not
           supported.
         2. The labels are not automatically label-encoded
         3. The ``classes_`` and ``n_classes_`` attributes are not learned
@@ -331,6 +377,12 @@ class XGBClassifier(xgb.XGBClassifier):
 
         xgb_options = self.get_xgb_params()
 
+        if eval_metric is not None:
+            if callable(eval_metric):
+                eval_metric = None
+            else:
+                xgb_options.update({'eval_metric': eval_metric})
+
         if self.n_classes_ > 2:
             # xgboost just ignores the user-provided objective
             # We only overwrite if it's the default...
@@ -348,7 +400,14 @@ class XGBClassifier(xgb.XGBClassifier):
         # TODO: sample weight
 
         self._Booster = train(client, xgb_options, X, y,
-                              num_boost_round=self.n_estimators)
+                              num_boost_round=self.n_estimators, eval_set=eval_set, 
+                              missing=self.missing, n_jobs=self.n_jobs,
+                              early_stopping_rounds=early_stopping_rounds)
+
+        if early_stopping_rounds is not None:
+            self.best_score = self._Booster.best_score
+            self.best_iteration = self._Booster.best_iteration
+            self.best_ntree_limit = self._Booster.best_ntree_limit
         return self
 
     def predict(self, X):

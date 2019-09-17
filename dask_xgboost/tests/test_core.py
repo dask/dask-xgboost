@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 import xgboost as xgb
-import sparse
 import scipy.sparse
 
 import pytest
@@ -82,8 +81,8 @@ def test_multiclass_classifier(loop):  # noqa
             da.utils.assert_eq(c.predict_proba(df), d.predict_proba(ddf))
 
 
-@pytest.mark.parametrize("kind", ['array', 'dataframe'])  # noqa
-def test_classifier_multi(kind, loop):
+@pytest.mark.parametrize("kind", ['array', 'dataframe'])
+def test_classifier_multi(kind, loop):  # noqa: F811
 
     if kind == 'array':
         X2 = da.from_array(X, 5)

@@ -26,7 +26,7 @@ jobs:
       - run:
           command: |
             source activate test-environment
-            pytest dask_xgboost
+            pytest -v -s dask_xgboost
       - run:
           command: |
             source activate test-environment

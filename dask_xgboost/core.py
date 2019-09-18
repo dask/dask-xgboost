@@ -14,6 +14,7 @@ except ImportError:
     sparse = False
     ss = False
 
+import dask
 from dask import delayed
 from dask.distributed import wait, default_client
 import dask.dataframe as dd
@@ -24,6 +25,13 @@ import xgboost as xgb
 from .tracker import RabitTracker
 
 logger = logging.getLogger(__name__)
+
+
+def maybe_get_client():
+    try:
+        return default_client()
+    except ValueError:
+        return None
 
 
 def parse_host_port(address):
@@ -187,6 +195,12 @@ def train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
     --------
     predict
     """
+    if (client is None or
+            not dask.is_dask_collection(data) or
+            not dask.is_dask_collection(labels)):
+        dtrain = xgb.DMatrix(data, labels, **dmatrix_kwargs)
+        return xgb.train(params, dtrain, **kwargs)
+
     return client.sync(_train, client, params, data,
                        labels, dmatrix_kwargs, **kwargs)
 
@@ -233,7 +247,10 @@ def predict(client, model, data):
     --------
     train
     """
-    if isinstance(data, dd._Frame):
+    if client is None or isinstance(data, (np.ndarray, pd.DataFrame)):
+        dm = xgb.DMatrix(data)
+        result = model.predict(dm)
+    elif isinstance(data, dd._Frame):
         result = data.map_partitions(_predict_part, model=model)
         result = result.values
     elif isinstance(data, da.Array):
@@ -276,14 +293,14 @@ class XGBRegressor(xgb.XGBRegressor):
         ``eval_metric``, ``early_stopping_rounds`` and ``verbose`` fit
         kwargs.
         """
-        client = default_client()
+        client = maybe_get_client()
         xgb_options = self.get_xgb_params()
         self._Booster = train(client, xgb_options, X, y,
                               num_boost_round=self.n_estimators)
         return self
 
     def predict(self, X):
-        client = default_client()
+        client = maybe_get_client()
         return predict(client, self._Booster, X)
 
 
@@ -316,14 +333,16 @@ class XGBClassifier(xgb.XGBClassifier):
         2. The labels are not automatically label-encoded
         3. The ``classes_`` and ``n_classes_`` attributes are not learned
         """
-        client = default_client()
+        client = maybe_get_client()
 
         if classes is None:
-            if isinstance(y, da.Array):
+            if isinstance(y, np.ndarray):
+                classes = np.unique(classes)
+            elif isinstance(y, da.Array):
                 classes = da.unique(y)
             else:
                 classes = y.unique()
-            classes = classes.compute()
+            classes = dask.compute(classes)
         else:
             classes = np.asarray(classes)
         self.classes_ = classes
@@ -346,16 +365,20 @@ class XGBClassifier(xgb.XGBClassifier):
         # TODO: auto label-encode y
         # that will require a dependency on dask-ml
         # TODO: sample weight
-
-        self._Booster = train(client, xgb_options, X, y,
-                              num_boost_round=self.n_estimators)
+        bst = train(client, xgb_options, X, y,
+                    num_boost_round=self.n_estimators)
+        self._Booster = bst
         return self
 
     def predict(self, X):
-        client = default_client()
+        client = maybe_get_client()
+
         class_probs = predict(client, self._Booster, X)
         if class_probs.ndim > 1:
-            cidx = da.argmax(class_probs, axis=1)
+            if isinstance(class_probs, (pd.DataFrame, np.ndarray)):
+                cidx = np.argmax(class_probs, axis=1)
+            else:
+                cidx = da.argmax(class_probs, axis=1)
         else:
             cidx = (class_probs > 0).astype(np.int64)
         return cidx

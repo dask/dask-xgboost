@@ -268,3 +268,25 @@ def test_errors(c, s, a, b):
         yield dxgb.train(c, param, df, df.x)
 
     assert 'foo' in str(info.value)
+
+
+@gen_cluster(client=True, timeout=None, check_new_threads=False)
+def test_concrete(c, s, a, b):
+    for est in [dxgb.XGBClassifier(), dxgb.XGBRegressor()]:
+        est.fit(X, y)
+        result = est.predict(X)
+        assert isinstance(result, np.ndarray)
+        est.score(X, y)
+
+
+def test_dask_search_cv(loop):  # noqa
+
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop):
+            model_selection = pytest.importorskip('dask_ml.model_selection')
+            est = dxgb.XGBClassifier()
+            cv = model_selection.RandomizedSearchCV(est,
+                                                    {'max_depth': [1, 10]})
+            dX = da.from_array(X, 5)
+            dy = da.from_array(y, 5)
+            cv.fit(dX, dy)

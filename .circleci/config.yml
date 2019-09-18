@@ -17,7 +17,7 @@ jobs:
             conda create -q -n test-environment python=${PYTHON}
             source activate test-environment
             conda install -q coverage flake8 pytest pytest-cov pytest-xdist numpy pandas xgboost dask distributed scikit-learn sparse scipy
-            pip install -e .
+            pip install --no-deps -e .
             conda list test-environment
       - run:
           # TODO: Check on the conda-forge recipe for why this is nescessary
@@ -26,7 +26,7 @@ jobs:
       - run:
           command: |
             source activate test-environment
-            pytest dask_xgboost
+            pytest -v -s dask_xgboost
       - run:
           command: |
             source activate test-environment

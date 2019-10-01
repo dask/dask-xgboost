@@ -83,18 +83,8 @@ def train_part(env, param, list_of_parts, dmatrix_kwargs=None, eval_set=None,
     dmatrix_kwargs["feature_names"] = getattr(data, 'columns', None)
     dtrain = xgb.DMatrix(data, labels, **dmatrix_kwargs)
 
-    if eval_set is not None:
-        if sample_weight_eval_set is None:
-            sample_weight_eval_set = [None] * len(eval_set)
-        evals = list(
-            xgb.DMatrix(eval_set[i][0].compute(), label=eval_set[i][1].compute(),
-                        missing=missing, weight=sample_weight_eval_set[i], 
-                        nthread=n_jobs)
-            for i in range(len(eval_set)))
-        evals = list(zip(evals, ["validation_{}".format(i) for i in
-                                    range(len(evals))]))
-    else:
-        evals = ()
+    evals = _package_evals(eval_set, sample_weight_eval_set=sample_weight_eval_set,
+                           missing=missing, n_jobs=n_jobs)
 
     args = [('%s=%s' % item).encode() for item in env.items()]
     xgb.rabit.init(args)
@@ -110,6 +100,21 @@ def train_part(env, param, list_of_parts, dmatrix_kwargs=None, eval_set=None,
     finally:
         xgb.rabit.finalize()
     return result
+
+def _package_evals(eval_set, sample_weight_eval_set=None, missing=None, n_jobs=None):
+    if eval_set is not None:
+        if sample_weight_eval_set is None:
+            sample_weight_eval_set = [None] * len(eval_set)
+        evals = list(xgb.DMatrix(data, label=label,
+                                 missing=missing, 
+                                 weight=weight,
+                                 nthread=n_jobs)
+                    for ((data, label), weight) in zip(eval_set, sample_weight_eval_set))
+        evals = list(zip(evals, ["validation_{}".format(i) for i in
+                                    range(len(evals))]))
+    else:
+        evals = ()
+    return evals
 
 
 @gen.coroutine
@@ -304,10 +309,10 @@ class XGBRegressor(xgb.XGBRegressor):
 class XGBClassifier(xgb.XGBClassifier):
 
     def fit(self, X, y=None, classes=None, 
-            sample_weight_eval_set=None, 
-            early_stopping_rounds=None,
             eval_set=None,
-            eval_metric=None):
+            sample_weight_eval_set=None, 
+            eval_metric=None,
+            early_stopping_rounds=None):
         """Fit a gradient boosting classifier
 
         Parameters

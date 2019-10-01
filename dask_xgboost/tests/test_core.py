@@ -101,9 +101,9 @@ def test_classifier_early_stopping(loop):
     with cluster() as (s, [_, _]):
         with Client(s['address'], loop=loop):
             clf1.fit(dX_train, dy_train, early_stopping_rounds=5, eval_metric="auc",
-                        eval_set=[(dX_test, dy_test)])
+                        eval_set=[(X_test, y_test)])
             clf2.fit(dX_train, dy_train, early_stopping_rounds=4, eval_metric="auc",
-                        eval_set=[(dX_test, dy_test)])
+                        eval_set=[(X_test, y_test)])
 
             # should be the same
             assert clf1.best_score == clf2.best_score
@@ -111,7 +111,7 @@ def test_classifier_early_stopping(loop):
 
             # check overfit
             clf3.fit(dX_train, dy_train, early_stopping_rounds=10, eval_metric="auc",
-                     eval_set=[(dX_test, dy_test)])
+                     eval_set=[(X_test, y_test)])
             assert clf3.best_score == 1
 
 

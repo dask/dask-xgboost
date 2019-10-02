@@ -1,34 +1,33 @@
-import numpy as np
-import pandas as pd
-import xgboost as xgb
-import scipy.sparse
-
-import pytest
-
-import dask
-import dask.array as da
-from dask.array.utils import assert_eq
-import dask.dataframe as dd
-from dask.distributed import Client
-from sklearn.datasets import load_digits, load_iris
-from sklearn.model_selection import train_test_split
-from distributed.utils_test import gen_cluster, loop, cluster  # noqa
-
-import dask_xgboost as dxgb
-
 # Workaround for conflict with distributed 1.23.0
 # https://github.com/dask/dask-xgboost/pull/27#issuecomment-417474734
 from concurrent.futures import ThreadPoolExecutor
+
+import dask
+import dask.array as da
+import dask.dataframe as dd
 import distributed.comm.utils
+import numpy as np
+import pandas as pd
+import pytest
+import scipy.sparse
+import xgboost as xgb
+from dask.array.utils import assert_eq
+from dask.distributed import Client
+from distributed.utils_test import cluster, gen_cluster, loop  # noqa
+from sklearn.datasets import load_digits, load_iris
+from sklearn.model_selection import train_test_split
+
+import dask_xgboost as dxgb
 
 distributed.comm.utils._offload_executor = ThreadPoolExecutor(max_workers=2)
 
 
-df = pd.DataFrame({'x': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-                   'y': [1, 0, 1, 0, 1, 0, 1, 0, 1, 0]})
+df = pd.DataFrame(
+    {"x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "y": [1, 0, 1, 0, 1, 0, 1, 0, 1, 0]}
+)
 labels = pd.Series([1, 0, 1, 0, 1, 0, 1, 1, 1, 1])
 
-param = {'max_depth': 2, 'eta': 1, 'silent': 1, 'objective': 'binary:logistic'}
+param = {"max_depth": 2, "eta": 1, "silent": 1, "objective": "binary:logistic"}
 
 X = df.values
 y = labels.values
@@ -36,7 +35,7 @@ y = labels.values
 
 def test_classifier(loop):  # noqa
     with cluster() as (s, [a, b]):
-        with Client(s['address'], loop=loop):
+        with Client(s["address"], loop=loop):
             a = dxgb.XGBClassifier()
             X2 = da.from_array(X, 5)
             y2 = da.from_array(y, 5)
@@ -45,8 +44,9 @@ def test_classifier(loop):  # noqa
 
     b = xgb.XGBClassifier()
     b.fit(X, y)
-    np.testing.assert_array_almost_equal(a.feature_importances_,
-                                         b.feature_importances_)
+    np.testing.assert_array_almost_equal(
+        a.feature_importances_, b.feature_importances_
+    )
     assert_eq(p1, b.predict(X))
 
 
@@ -57,7 +57,7 @@ def test_multiclass_classifier(loop):  # noqa
     dX = da.from_array(X, 5)
     dy = da.from_array(y, 5)
     df = pd.DataFrame(X, columns=iris.feature_names)
-    labels = pd.Series(y, name='target')
+    labels = pd.Series(y, name="target")
 
     ddf = dd.from_pandas(df, 2)
     dlabels = dd.from_pandas(labels, 2)
@@ -68,7 +68,7 @@ def test_multiclass_classifier(loop):  # noqa
     d = dxgb.XGBClassifier()
 
     with cluster() as (s, [_, _]):
-        with Client(s['address'], loop=loop):
+        with Client(s["address"], loop=loop):
             # fit
             a.fit(X, y)  # array
             b.fit(dX, dy, classes=[0, 1, 2])
@@ -82,62 +82,72 @@ def test_multiclass_classifier(loop):  # noqa
             da.utils.assert_eq(c.predict_proba(df), d.predict_proba(ddf))
 
 
-def test_classifier_early_stopping(loop):
+def test_classifier_early_stopping(loop):  # noqa
     # data
     digits = load_digits(2)
-    X = digits['data']
-    y = digits['target']
-    X_train, X_test, y_train, y_test = train_test_split(X, y,
-                                                        random_state=0)
+    X = digits["data"]
+    y = digits["target"]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=0)
 
     dX_train = da.from_array(X_train)
     dy_train = da.from_array(y_train)
-    dX_test = da.from_array(X_test)
-    dy_test = da.from_array(y_test)
 
     clf1 = dxgb.XGBClassifier()
     clf2 = dxgb.XGBClassifier()
     clf3 = dxgb.XGBClassifier()
     with cluster() as (s, [_, _]):
-        with Client(s['address'], loop=loop):
-            clf1.fit(dX_train, dy_train, early_stopping_rounds=5, eval_metric="auc",
-                        eval_set=[(X_test, y_test)])
-            clf2.fit(dX_train, dy_train, early_stopping_rounds=4, eval_metric="auc",
-                        eval_set=[(X_test, y_test)])
+        with Client(s["address"], loop=loop):
+            clf1.fit(
+                dX_train,
+                dy_train,
+                early_stopping_rounds=5,
+                eval_metric="auc",
+                eval_set=[(X_test, y_test)],
+            )
+            clf2.fit(
+                dX_train,
+                dy_train,
+                early_stopping_rounds=4,
+                eval_metric="auc",
+                eval_set=[(X_test, y_test)],
+            )
 
             # should be the same
             assert clf1.best_score == clf2.best_score
             assert clf1.best_score != 1
 
             # check overfit
-            clf3.fit(dX_train, dy_train, early_stopping_rounds=10, eval_metric="auc",
-                     eval_set=[(X_test, y_test)])
+            clf3.fit(
+                dX_train,
+                dy_train,
+                early_stopping_rounds=10,
+                eval_metric="auc",
+                eval_set=[(X_test, y_test)],
+            )
             assert clf3.best_score == 1
 
 
-@pytest.mark.parametrize("kind", ['array', 'dataframe'])
+@pytest.mark.parametrize("kind", ["array", "dataframe"])
 def test_classifier_multi(kind, loop):  # noqa: F811
 
-    if kind == 'array':
+    if kind == "array":
         X2 = da.from_array(X, 5)
-        y2 = da.from_array(
-            np.array([0, 1, 2, 0, 1, 2, 0, 0, 0, 1]),
-            chunks=5,
-        )
+        y2 = da.from_array(np.array([0, 1, 2, 0, 1, 2, 0, 0, 0, 1]), chunks=5)
     else:
         X2 = dd.from_pandas(df, npartitions=2)
         y2 = dd.from_pandas(labels, npartitions=2)
 
     with cluster() as (s, [a, b]):
-        with Client(s['address'], loop=loop):
-            a = dxgb.XGBClassifier(num_class=3, n_estimators=10,
-                                   objective="multi:softprob")
+        with Client(s["address"], loop=loop):
+            a = dxgb.XGBClassifier(
+                num_class=3, n_estimators=10, objective="multi:softprob"
+            )
             a.fit(X2, y2)
             p1 = a.predict(X2)
 
             assert dask.is_dask_collection(p1)
 
-            if kind == 'array':
+            if kind == "array":
                 assert p1.shape == (10,)
 
             result = p1.compute()
@@ -147,13 +157,14 @@ def test_classifier_multi(kind, loop):  # noqa: F811
             p2 = a.predict_proba(X2)
             assert dask.is_dask_collection(p2)
 
-            if kind == 'array':
+            if kind == "array":
                 assert p2.shape == (10, 3)
             assert p2.compute().shape == (10, 3)
 
+
 def test_regressor(loop):  # noqa
     with cluster() as (s, [a, b]):
-        with Client(s['address'], loop=loop):
+        with Client(s["address"], loop=loop):
             a = dxgb.XGBRegressor()
             X2 = da.from_array(X, 5)
             y2 = da.from_array(y, 5)
@@ -277,7 +288,7 @@ def test_synchronous_api(loop):  # noqa
     dlabels = dd.from_pandas(labels, npartitions=4)
 
     with cluster() as (s, [a, b]):
-        with Client(s['address'], loop=loop) as c:
+        with Client(s["address"], loop=loop) as c:
 
             dbst = dxgb.train(c, param, ddf, dlabels)
 
@@ -292,7 +303,7 @@ def test_synchronous_api(loop):  # noqa
 @gen_cluster(client=True, timeout=None)
 def test_errors(c, s, a, b):
     def f(part):
-        raise Exception('foo')
+        raise Exception("foo")
 
     df = dd.demo.make_timeseries()
     df = df.map_partitions(f, meta=df._meta)
@@ -300,4 +311,4 @@ def test_errors(c, s, a, b):
     with pytest.raises(Exception) as info:
         yield dxgb.train(c, param, df, df.x)
 
-    assert 'foo' in str(info.value)
+    assert "foo" in str(info.value)

@@ -364,7 +364,7 @@ class XGBClassifier(xgb.XGBClassifier):
             of instance weights on the i-th validation set.
         eval_metric : str, list of str, or callable, optional
             If a str, should be a built-in evaluation metric to use. See
-            doc/parameter.rst.
+            `doc/parameter.rst <https://github.com/dmlc/xgboost/blob/master/doc/parameter.rst>`_.
             If a list of str, should be the list of multiple built-in
             evaluation metrics to use.
             If callable, a custom evaluation metric. The call

@@ -306,7 +306,15 @@ def predict(client, model, data):
 
 
 class XGBRegressor(xgb.XGBRegressor):
-    def fit(self, X, y=None):
+    def fit(
+        self,
+        X,
+        y=None,
+        eval_set=None,
+        sample_weight_eval_set=None,
+        eval_metric=None,
+        early_stopping_rounds=None,
+    ):
         """Fit the gradient boosting model
 
         Parameters
@@ -323,12 +331,66 @@ class XGBRegressor(xgb.XGBRegressor):
         This differs from the XGBoost version not supporting the ``eval_set``,
         ``eval_metric``, ``early_stopping_rounds`` and ``verbose`` fit
         kwargs.
+        eval_set : list, optional
+            A list of (X, y) tuple pairs to use as validation sets, for which
+            metrics will be computed.
+            Validation metrics will help us track the performance of the model.
+        sample_weight_eval_set : list, optional
+            A list of the form [L_1, L_2, ..., L_n], where each L_i is a list
+            of instance weights on the i-th validation set.
+        eval_metric : str, list of str, or callable, optional
+            If a str, should be a built-in evaluation metric to use. See
+            `doc/parameter.rst <https://github.com/dmlc/xgboost/blob/master/doc/parameter.rst>`_.  # noqa: E501
+            If a list of str, should be the list of multiple built-in
+            evaluation metrics to use.
+            If callable, a custom evaluation metric. The call
+            signature is ``func(y_predicted, y_true)`` where ``y_true`` will
+            be a DMatrix object such that you may need to call the
+            ``get_label`` method. It must return a str, value pair where
+            the str is a name for the evaluation and value is the value of
+            the evaluation function. The callable custom objective is always
+            minimized.
+        early_stopping_rounds : int
+            Activates early stopping. Validation metric needs to improve at
+            least once in every **early_stopping_rounds** round(s) to continue
+            training.
+            Requires at least one item in **eval_set**.
+            The method returns the model from the last iteration (not the best
+            one).
+            If there's more than one item in **eval_set**, the last entry will
+            be used for early stopping.
+            If there's more than one metric in **eval_metric**, the last
+            metric will be used for early stopping.
+            If early stopping occurs, the model will have three additional
+            fields:
+            ``clf.best_score``, ``clf.best_iteration`` and
+            ``clf.best_ntree_limit``.
         """
         client = default_client()
         xgb_options = self.get_xgb_params()
+
+        if eval_metric is not None:
+            if callable(eval_metric):
+                eval_metric = None
+            else:
+                xgb_options.update({"eval_metric": eval_metric})
+
         self._Booster = train(
-            client, xgb_options, X, y, num_boost_round=self.n_estimators
+            client,
+            xgb_options,
+            X,
+            y,
+            num_boost_round=self.n_estimators,
+            eval_set=eval_set,
+            missing=self.missing,
+            n_jobs=self.n_jobs,
+            early_stopping_rounds=early_stopping_rounds,
         )
+
+        if early_stopping_rounds is not None:
+            self.best_score = self._Booster.best_score
+            self.best_iteration = self._Booster.best_iteration
+            self.best_ntree_limit = self._Booster.best_ntree_limit
         return self
 
     def predict(self, X):
@@ -364,7 +426,7 @@ class XGBClassifier(xgb.XGBClassifier):
             of instance weights on the i-th validation set.
         eval_metric : str, list of str, or callable, optional
             If a str, should be a built-in evaluation metric to use. See
-            `doc/parameter.rst <https://github.com/dmlc/xgboost/blob/master/doc/parameter.rst>`_.
+            `doc/parameter.rst <https://github.com/dmlc/xgboost/blob/master/doc/parameter.rst>`_.  # noqa: E501
             If a list of str, should be the list of multiple built-in
             evaluation metrics to use.
             If callable, a custom evaluation metric. The call

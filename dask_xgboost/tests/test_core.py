@@ -176,6 +176,27 @@ def test_regressor(loop):  # noqa
     assert_eq(p1, b.predict(X))
 
 
+def test_regressor_with_early_stopping(loop):  # noqa
+    with cluster() as (s, [a, b]):
+        with Client(s["address"], loop=loop):
+            a = dxgb.XGBRegressor()
+            X2 = da.from_array(X, 5)
+            y2 = da.from_array(y, 5)
+            a.fit(
+                X2,
+                y2,
+                early_stopping_rounds=4,
+                eval_metric="rmse",
+                eval_set=[(X, y)],
+            )
+            p1 = a.predict(X2)
+
+    b = xgb.XGBRegressor()
+    b.fit(X, y, early_stopping_rounds=4, eval_metric="rmse", eval_set=[(X, y)])
+    assert_eq(p1, b.predict(X))
+    assert_eq(a.best_score, b.best_score)
+
+
 @gen_cluster(client=True, timeout=None)
 def test_basic(c, s, a, b):
     dtrain = xgb.DMatrix(df, label=labels)

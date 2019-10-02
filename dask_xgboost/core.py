@@ -22,8 +22,6 @@ except ImportError:
     ss = False
 
 
-
-
 logger = logging.getLogger(__name__)
 
 

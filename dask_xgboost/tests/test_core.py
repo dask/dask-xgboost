@@ -18,6 +18,7 @@ from sklearn.datasets import load_digits, load_iris
 from sklearn.model_selection import train_test_split
 
 import dask_xgboost as dxgb
+from dask_xgboost.core import _package_evals
 
 distributed.comm.utils._offload_executor = ThreadPoolExecutor(max_workers=2)
 
@@ -125,6 +126,34 @@ def test_classifier_early_stopping(loop):  # noqa
                 eval_set=[(X_test, y_test)],
             )
             assert clf3.best_score == 1
+
+
+def test_package_evals():
+    # data
+    digits = load_digits(2)
+    X = digits["data"]
+    y = digits["target"]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=0)
+
+    evals = _package_evals(
+        [(X_test, y_test), (X, y_test)],
+    )
+
+    assert len(evals) == 2
+
+    evals = _package_evals(
+        [(X_test, y_test), (X, y_test)],
+        sample_weight_eval_set=[[1], [2]],
+    )
+
+    assert len(evals) == 2
+
+    evals = _package_evals(
+        [(X_test, y_test), (X, y_test)],
+        sample_weight_eval_set=[[1]],
+    )
+
+    assert len(evals) == 1
 
 
 @pytest.mark.parametrize("kind", ["array", "dataframe"])

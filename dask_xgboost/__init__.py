@@ -1,3 +1,3 @@
-from .core import _train, train, predict, XGBClassifier, XGBRegressor  # noqa
+from .core import XGBClassifier, XGBRegressor, _train, predict, train  # noqa
 
-__version__ = '0.1.7'
+__version__ = "0.1.7"

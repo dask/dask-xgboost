@@ -1,11 +1,18 @@
-from collections import defaultdict
 import logging
+from collections import defaultdict
 from threading import Thread
 
+import dask.array as da
+import dask.dataframe as dd
 import numpy as np
 import pandas as pd
-from toolz import first, assoc
+import xgboost as xgb
+from dask import delayed
+from dask.distributed import default_client, wait
+from toolz import assoc, first
 from tornado import gen
+
+from .tracker import RabitTracker
 
 try:
     import sparse
@@ -14,29 +21,21 @@ except ImportError:
     sparse = False
     ss = False
 
-from dask import delayed
-from dask.distributed import wait, default_client
-import dask.dataframe as dd
-import dask.array as da
-
-import xgboost as xgb
-
-from .tracker import RabitTracker
 
 logger = logging.getLogger(__name__)
 
 
 def parse_host_port(address):
-    if '://' in address:
-        address = address.rsplit('://', 1)[1]
-    host, port = address.split(':')
+    if "://" in address:
+        address = address.rsplit("://", 1)[1]
+    host, port = address.split(":")
     port = int(port)
     return host, port
 
 
 def start_tracker(host, n_workers):
     """ Start Rabit tracker """
-    env = {'DMLC_NUM_WORKER': n_workers}
+    env = {"DMLC_NUM_WORKER": n_workers}
     rabit = RabitTracker(hostIP=host, nslave=n_workers)
     env.update(rabit.slave_envs())
 
@@ -54,15 +53,27 @@ def concat(L):
     elif isinstance(L[0], (pd.DataFrame, pd.Series)):
         return pd.concat(L, axis=0)
     elif ss and isinstance(L[0], ss.spmatrix):
-        return ss.vstack(L, format='csr')
+        return ss.vstack(L, format="csr")
     elif sparse and isinstance(L[0], sparse.SparseArray):
         return sparse.concatenate(L, axis=0)
     else:
-        raise TypeError("Data must be either numpy arrays or pandas dataframes"
-                        ". Got %s" % type(L[0]))
+        raise TypeError(
+            "Data must be either numpy arrays or pandas dataframes"
+            ". Got %s" % type(L[0])
+        )
 
 
-def train_part(env, param, list_of_parts, dmatrix_kwargs=None, **kwargs):
+def train_part(
+    env,
+    param,
+    list_of_parts,
+    dmatrix_kwargs=None,
+    eval_set=None,
+    missing=None,
+    n_jobs=None,
+    sample_weight_eval_set=None,
+    **kwargs
+):
     """
     Run part of XGBoost distributed workload
 
@@ -74,20 +85,27 @@ def train_part(env, param, list_of_parts, dmatrix_kwargs=None, **kwargs):
     model if rank zero, None otherwise
     """
     data, labels = zip(*list_of_parts)  # Prepare data
-    data = concat(data)                 # Concatenate many parts into one
+    data = concat(data)  # Concatenate many parts into one
     labels = concat(labels)
     if dmatrix_kwargs is None:
         dmatrix_kwargs = {}
 
-    dmatrix_kwargs["feature_names"] = getattr(data, 'columns', None)
+    dmatrix_kwargs["feature_names"] = getattr(data, "columns", None)
     dtrain = xgb.DMatrix(data, labels, **dmatrix_kwargs)
 
-    args = [('%s=%s' % item).encode() for item in env.items()]
+    evals = _package_evals(
+        eval_set,
+        sample_weight_eval_set=sample_weight_eval_set,
+        missing=missing,
+        n_jobs=n_jobs,
+    )
+
+    args = [("%s=%s" % item).encode() for item in env.items()]
     xgb.rabit.init(args)
     try:
         logger.info("Starting Rabit, Rank %d", xgb.rabit.get_rank())
 
-        bst = xgb.train(param, dtrain, **kwargs)
+        bst = xgb.train(param, dtrain, evals=evals, **kwargs)
 
         if xgb.rabit.get_rank() == 0:  # Only return from one worker
             result = bst
@@ -96,6 +114,32 @@ def train_part(env, param, list_of_parts, dmatrix_kwargs=None, **kwargs):
     finally:
         xgb.rabit.finalize()
     return result
+
+
+def _package_evals(
+    eval_set, sample_weight_eval_set=None, missing=None, n_jobs=None
+):
+    if eval_set is not None:
+        if sample_weight_eval_set is None:
+            sample_weight_eval_set = [None] * len(eval_set)
+        evals = list(
+            xgb.DMatrix(
+                data,
+                label=label,
+                missing=missing,
+                weight=weight,
+                nthread=n_jobs,
+            )
+            for ((data, label), weight) in zip(
+                eval_set, sample_weight_eval_set
+            )
+        )
+        evals = list(
+            zip(evals, ["validation_{}".format(i) for i in range(len(evals))])
+        )
+    else:
+        evals = ()
+    return evals
 
 
 @gen.coroutine
@@ -123,7 +167,7 @@ def _train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
     yield wait(parts)
 
     for part in parts:
-        if part.status == 'error':
+        if part.status == "error":
             yield part  # trigger error locally
 
     # Because XGBoost-python doesn't yet allow iterative training, we need to
@@ -138,16 +182,23 @@ def _train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
 
     # Start the XGBoost tracker on the Dask scheduler
     host, port = parse_host_port(client.scheduler.address)
-    env = yield client._run_on_scheduler(start_tracker,
-                                         host.strip('/:'),
-                                         len(worker_map))
+    env = yield client._run_on_scheduler(
+        start_tracker, host.strip("/:"), len(worker_map)
+    )
 
     # Tell each worker to train on the chunks/parts that it has locally
-    futures = [client.submit(train_part, env,
-                             assoc(params, 'nthread', ncores[worker]),
-                             list_of_parts, workers=worker,
-                             dmatrix_kwargs=dmatrix_kwargs, **kwargs)
-               for worker, list_of_parts in worker_map.items()]
+    futures = [
+        client.submit(
+            train_part,
+            env,
+            assoc(params, "nthread", ncores[worker]),
+            list_of_parts,
+            workers=worker,
+            dmatrix_kwargs=dmatrix_kwargs,
+            **kwargs
+        )
+        for worker, list_of_parts in worker_map.items()
+    ]
 
     # Get the results, only one will be non-None
     results = yield client._gather(futures)
@@ -187,8 +238,9 @@ def train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
     --------
     predict
     """
-    return client.sync(_train, client, params, data,
-                       labels, dmatrix_kwargs, **kwargs)
+    return client.sync(
+        _train, client, params, data, labels, dmatrix_kwargs, **kwargs
+    )
 
 
 def _predict_part(part, model=None):
@@ -203,7 +255,7 @@ def _predict_part(part, model=None):
         if model.attr("num_class"):
             result = pd.DataFrame(result, index=part.index)
         else:
-            result = pd.Series(result, index=part.index, name='predictions')
+            result = pd.Series(result, index=part.index, name="predictions")
     return result
 
 
@@ -242,23 +294,27 @@ def predict(client, model, data):
 
         if num_class > 2:
             kwargs = dict(
-                drop_axis=None,
-                chunks=(data.chunks[0], (num_class,)),
+                drop_axis=None, chunks=(data.chunks[0], (num_class,))
             )
         else:
-            kwargs = dict(
-                drop_axis=1,
-            )
-        result = data.map_blocks(_predict_part, model=model,
-                                 dtype=np.float32,
-                                 **kwargs)
+            kwargs = dict(drop_axis=1)
+        result = data.map_blocks(
+            _predict_part, model=model, dtype=np.float32, **kwargs
+        )
 
     return result
 
 
 class XGBRegressor(xgb.XGBRegressor):
-
-    def fit(self, X, y=None):
+    def fit(
+        self,
+        X,
+        y=None,
+        eval_set=None,
+        sample_weight_eval_set=None,
+        eval_metric=None,
+        early_stopping_rounds=None,
+    ):
         """Fit the gradient boosting model
 
         Parameters
@@ -275,11 +331,66 @@ class XGBRegressor(xgb.XGBRegressor):
         This differs from the XGBoost version not supporting the ``eval_set``,
         ``eval_metric``, ``early_stopping_rounds`` and ``verbose`` fit
         kwargs.
+        eval_set : list, optional
+            A list of (X, y) tuple pairs to use as validation sets, for which
+            metrics will be computed.
+            Validation metrics will help us track the performance of the model.
+        sample_weight_eval_set : list, optional
+            A list of the form [L_1, L_2, ..., L_n], where each L_i is a list
+            of instance weights on the i-th validation set.
+        eval_metric : str, list of str, or callable, optional
+            If a str, should be a built-in evaluation metric to use. See
+            `doc/parameter.rst <https://github.com/dmlc/xgboost/blob/master/doc/parameter.rst>`_.  # noqa: E501
+            If a list of str, should be the list of multiple built-in
+            evaluation metrics to use.
+            If callable, a custom evaluation metric. The call
+            signature is ``func(y_predicted, y_true)`` where ``y_true`` will
+            be a DMatrix object such that you may need to call the
+            ``get_label`` method. It must return a str, value pair where
+            the str is a name for the evaluation and value is the value of
+            the evaluation function. The callable custom objective is always
+            minimized.
+        early_stopping_rounds : int
+            Activates early stopping. Validation metric needs to improve at
+            least once in every **early_stopping_rounds** round(s) to continue
+            training.
+            Requires at least one item in **eval_set**.
+            The method returns the model from the last iteration (not the best
+            one).
+            If there's more than one item in **eval_set**, the last entry will
+            be used for early stopping.
+            If there's more than one metric in **eval_metric**, the last
+            metric will be used for early stopping.
+            If early stopping occurs, the model will have three additional
+            fields:
+            ``clf.best_score``, ``clf.best_iteration`` and
+            ``clf.best_ntree_limit``.
         """
         client = default_client()
         xgb_options = self.get_xgb_params()
-        self._Booster = train(client, xgb_options, X, y,
-                              num_boost_round=self.n_estimators)
+
+        if eval_metric is not None:
+            if callable(eval_metric):
+                eval_metric = None
+            else:
+                xgb_options.update({"eval_metric": eval_metric})
+
+        self._Booster = train(
+            client,
+            xgb_options,
+            X,
+            y,
+            num_boost_round=self.n_estimators,
+            eval_set=eval_set,
+            missing=self.missing,
+            n_jobs=self.n_jobs,
+            early_stopping_rounds=early_stopping_rounds,
+        )
+
+        if early_stopping_rounds is not None:
+            self.best_score = self._Booster.best_score
+            self.best_iteration = self._Booster.best_iteration
+            self.best_ntree_limit = self._Booster.best_ntree_limit
         return self
 
     def predict(self, X):
@@ -288,8 +399,16 @@ class XGBRegressor(xgb.XGBRegressor):
 
 
 class XGBClassifier(xgb.XGBClassifier):
-
-    def fit(self, X, y=None, classes=None):
+    def fit(
+        self,
+        X,
+        y=None,
+        classes=None,
+        eval_set=None,
+        sample_weight_eval_set=None,
+        eval_metric=None,
+        early_stopping_rounds=None,
+    ):
         """Fit a gradient boosting classifier
 
         Parameters
@@ -298,6 +417,40 @@ class XGBClassifier(xgb.XGBClassifier):
             Feature Matrix. May be a dask.array or dask.dataframe
         y : array-like
             Labels
+        eval_set : list, optional
+            A list of (X, y) tuple pairs to use as validation sets, for which
+            metrics will be computed.
+            Validation metrics will help us track the performance of the model.
+        sample_weight_eval_set : list, optional
+            A list of the form [L_1, L_2, ..., L_n], where each L_i is a list
+            of instance weights on the i-th validation set.
+        eval_metric : str, list of str, or callable, optional
+            If a str, should be a built-in evaluation metric to use. See
+            `doc/parameter.rst <https://github.com/dmlc/xgboost/blob/master/doc/parameter.rst>`_.  # noqa: E501
+            If a list of str, should be the list of multiple built-in
+            evaluation metrics to use.
+            If callable, a custom evaluation metric. The call
+            signature is ``func(y_predicted, y_true)`` where ``y_true`` will
+            be a DMatrix object such that you may need to call the
+            ``get_label`` method. It must return a str, value pair where
+            the str is a name for the evaluation and value is the value of
+            the evaluation function. The callable custom objective is always
+            minimized.
+        early_stopping_rounds : int
+            Activates early stopping. Validation metric needs to improve at
+            least once in every **early_stopping_rounds** round(s) to continue
+            training.
+            Requires at least one item in **eval_set**.
+            The method returns the model from the last iteration (not the best
+            one).
+            If there's more than one item in **eval_set**, the last entry will
+            be used for early stopping.
+            If there's more than one metric in **eval_metric**, the last
+            metric will be used for early stopping.
+            If early stopping occurs, the model will have three additional
+            fields:
+            ``clf.best_score``, ``clf.best_iteration`` and
+            ``clf.best_ntree_limit``.
         classes : sequence, optional
             The unique values in `y`. If no specified, this will be
             eagerly computed from `y` before training.
@@ -310,8 +463,7 @@ class XGBClassifier(xgb.XGBClassifier):
         -----
         This differs from the XGBoost version in three ways
 
-        1. The ``sample_weight``, ``eval_set``, ``eval_metric``,
-          ``early_stopping_rounds`` and ``verbose`` fit kwargs are not
+        1. The ``sample_weight`` and ``verbose`` fit kwargs are not
           supported.
         2. The labels are not automatically label-encoded
         3. The ``classes_`` and ``n_classes_`` attributes are not learned
@@ -331,24 +483,44 @@ class XGBClassifier(xgb.XGBClassifier):
 
         xgb_options = self.get_xgb_params()
 
+        if eval_metric is not None:
+            if callable(eval_metric):
+                eval_metric = None
+            else:
+                xgb_options.update({"eval_metric": eval_metric})
+
         if self.n_classes_ > 2:
             # xgboost just ignores the user-provided objective
             # We only overwrite if it's the default...
-            if xgb_options['objective'] == "binary:logistic":
+            if xgb_options["objective"] == "binary:logistic":
                 xgb_options["objective"] = "multi:softprob"
 
-            xgb_options.setdefault('num_class', self.n_classes_)
+            xgb_options.setdefault("num_class", self.n_classes_)
 
         # xgboost sets this to self.objective, which I think is wrong
         # hyper-parameters should not be updated during fit.
-        self.objective = xgb_options['objective']
+        self.objective = xgb_options["objective"]
 
         # TODO: auto label-encode y
         # that will require a dependency on dask-ml
         # TODO: sample weight
 
-        self._Booster = train(client, xgb_options, X, y,
-                              num_boost_round=self.n_estimators)
+        self._Booster = train(
+            client,
+            xgb_options,
+            X,
+            y,
+            num_boost_round=self.n_estimators,
+            eval_set=eval_set,
+            missing=self.missing,
+            n_jobs=self.n_jobs,
+            early_stopping_rounds=early_stopping_rounds,
+        )
+
+        if early_stopping_rounds is not None:
+            self.best_score = self._Booster.best_score
+            self.best_iteration = self._Booster.best_iteration
+            self.best_ntree_limit = self._Booster.best_ntree_limit
         return self
 
     def predict(self, X):
@@ -363,7 +535,8 @@ class XGBClassifier(xgb.XGBClassifier):
     def predict_proba(self, data, ntree_limit=None):
         client = default_client()
         if ntree_limit is not None:
-            raise NotImplementedError("'ntree_limit' is not currently "
-                                      "supported.")
+            raise NotImplementedError(
+                "'ntree_limit' is not currently " "supported."
+            )
         class_probs = predict(client, self._Booster, data)
         return class_probs

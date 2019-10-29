@@ -362,3 +362,33 @@ def test_errors(c, s, a, b):
         yield dxgb.train(c, param, df, df.x)
 
     assert "foo" in str(info.value)
+
+
+@gen_cluster(client=True, timeout=None)
+@pytest.mark.asyncio
+async def test_predict_proba(c, s, a, b):
+    X = da.random.random((50, 2), chunks=25)
+    y = da.random.randint(0, 2, size=50, chunks=25)
+    X_ = await c.compute(X)
+
+    # array
+    clf = dxgb.XGBClassifier()
+    clf.fit(X, y, classes=[0, 1])
+    booster = await clf._Booster
+
+    result = clf.predict_proba(X_)
+    expected = booster.predict(xgb.DMatrix(X_))
+    np.testing.assert_array_equal(result, expected)
+
+    # dataframe
+    XX = dd.from_dask_array(X, columns=['A', 'B'])
+    yy = dd.from_dask_array(y)
+    XX_ = await c.compute(XX)
+
+    clf = dxgb.XGBClassifier()
+    clf.fit(XX, yy, classes=[0, 1])
+    booster = await clf._Booster
+
+    result = clf.predict_proba(XX_)
+    expected = booster.predict(xgb.DMatrix(XX_))
+    np.testing.assert_array_equal(result, expected)

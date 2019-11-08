@@ -393,27 +393,28 @@ async def test_predict_proba(c, s, a, b):
     expected = booster.predict(xgb.DMatrix(XX_))
     np.testing.assert_array_equal(result, expected)
 
-def test_classifier_evals_result(loop):  # noqa
-    # data
-    digits = load_digits(2)
-    X = digits["data"]
-    y = digits["target"]
-    X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=0)
-
-    dX_train = da.from_array(X_train)
-    dy_train = da.from_array(y_train)
-
-    clf1 = dxgb.XGBClassifier()
-    with cluster() as (s, [_, _]):
+def test_regressor_evals_result(loop):  # noqa
+    with cluster() as (s, [a, b]):
         with Client(s["address"], loop=loop):
-            clf1.fit(
-                dX_train,
-                dy_train,
-                early_stopping_rounds=4,
-                eval_metric="auc",
-                eval_set=[(X_test, y_test)],
-            )
+            a = dxgb.XGBRegressor()
+            X2 = da.from_array(X, 5)
+            y2 = da.from_array(y, 5)
+            a.fit(X2, y2, eval_metric="rmse", eval_set=[(X2, y2)])
+            evals_result = a.evals_result()
 
-            # should be the same
-            assert "auc" in clf1.evals_result()['validation_0'].keys()
-            assert len(clf1.evals_result()['validation_0']['auc']) > 0
+    b = xgb.XGBRegressor()
+    b.fit(X, y, eval_metric="rmse", eval_set=[(X, y)])
+    assert_eq(evals_result, b.evals_result())
+
+def test_classifier_evals_result(loop):  # noqa
+    with cluster() as (s, [a, b]):
+        with Client(s["address"], loop=loop):
+            a = dxgb.XGBClassifier()
+            X2 = da.from_array(X, 5)
+            y2 = da.from_array(y, 5)
+            a.fit(X2, y2, eval_metric="rmse", eval_set=[(X2, y2)])
+            evals_result = a.evals_result()
+
+    b = xgb.XGBClassifier()
+    b.fit(X, y, eval_metric="rmse", eval_set=[(X, y)])
+    assert_eq(evals_result, b.evals_result())

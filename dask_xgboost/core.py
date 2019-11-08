@@ -206,7 +206,7 @@ def _train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
 
     # Get the results, only one will be non-None
     results = yield client._gather(futures)
-    result, evals_result = [v for v in results if v][0]
+    result, evals_result = [v for v in results if v.count(None) != len(v)][0]
     num_class = params.get("num_class")
     if num_class:
         result.set_attr(num_class=str(num_class))

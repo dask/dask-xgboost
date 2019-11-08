@@ -100,24 +100,26 @@ def train_part(
         n_jobs=n_jobs,
     )
 
+    evals_result = {}
+
     args = [("%s=%s" % item).encode() for item in env.items()]
     xgb.rabit.init(args)
     try:
         local_history = {}
         logger.info("Starting Rabit, Rank %d", xgb.rabit.get_rank())
-
         bst = xgb.train(
             param, dtrain, evals=evals, evals_result=local_history, **kwargs
         )
 
-        ret = {"booster": bst, "history": local_history}
         if xgb.rabit.get_rank() == 0:  # Only return from one worker
-            ret
+            result = bst
+            evals_result = local_history
         else:
-            ret = None
+            result = None
+            evals_result = None
     finally:
         xgb.rabit.finalize()
-    return ret
+    return result, evals_result
 
 
 def _package_evals(
@@ -384,7 +386,7 @@ class XGBRegressor(xgb.XGBRegressor):
             else:
                 xgb_options.update({"eval_metric": eval_metric})
 
-        results = train(
+        self._Booster, self.evals_result_ = train(
             client,
             xgb_options,
             X,
@@ -395,9 +397,6 @@ class XGBRegressor(xgb.XGBRegressor):
             n_jobs=self.n_jobs,
             early_stopping_rounds=early_stopping_rounds,
         )
-
-        self._Booster = results["booster"]
-        self.evals_result_ = results["history"]
 
         if early_stopping_rounds is not None:
             self.best_score = self._Booster.best_score
@@ -517,7 +516,7 @@ class XGBClassifier(xgb.XGBClassifier):
         # that will require a dependency on dask-ml
         # TODO: sample weight
 
-        results = train(
+        self._Booster, self.evals_result_ = train(
             client,
             xgb_options,
             X,
@@ -528,9 +527,6 @@ class XGBClassifier(xgb.XGBClassifier):
             n_jobs=self.n_jobs,
             early_stopping_rounds=early_stopping_rounds,
         )
-
-        self._Booster = results["booster"]
-        self.evals_result_ = results["history"]
 
         if early_stopping_rounds is not None:
             self.best_score = self._Booster.best_score

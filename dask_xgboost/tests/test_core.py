@@ -399,7 +399,7 @@ def test_regressor_evals_result(loop):  # noqa
             a = dxgb.XGBRegressor()
             X2 = da.from_array(X, 5)
             y2 = da.from_array(y, 5)
-            a.fit(X2, y2, eval_metric="rmse", eval_set=[(X2, y2)])
+            a.fit(X2, y2, eval_metric="rmse", eval_set=[(X, y)])
             evals_result = a.evals_result()
 
     b = xgb.XGBRegressor()
@@ -412,7 +412,7 @@ def test_classifier_evals_result(loop):  # noqa
             a = dxgb.XGBClassifier()
             X2 = da.from_array(X, 5)
             y2 = da.from_array(y, 5)
-            a.fit(X2, y2, eval_metric="rmse", eval_set=[(X2, y2)])
+            a.fit(X2, y2, eval_metric="rmse", eval_set=[(X, y)])
             evals_result = a.evals_result()
 
     b = xgb.XGBClassifier()

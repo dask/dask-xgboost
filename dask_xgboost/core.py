@@ -7,7 +7,7 @@ import dask.dataframe as dd
 import numpy as np
 import pandas as pd
 import xgboost as xgb
-from dask import delayed
+from dask import delayed, is_dask_collection
 from dask.distributed import default_client, wait
 from toolz import assoc, first
 from tornado import gen
@@ -124,16 +124,9 @@ def _package_evals(
     eval_set, sample_weight_eval_set=None, missing=None, n_jobs=None
 ):
     if eval_set is not None:
-        eval_set_dask_collections = [
-            type(e)
-            for evals in eval_set
-            for e in evals
-            if isinstance(e, (da.Array, dd.DataFrame, dd.Series))
-        ]
-        if len(eval_set_dask_collections) > 0:
+        if any(is_dask_collection(e) for evals in eval_set for e in evals):
             raise TypeError(
-                "Evaluation set must not contain dask collection"
-                ". Got %s" % eval_set_dask_collections
+                "Evaluation set must not contain dask collections."
             )
 
         if sample_weight_eval_set is None:
@@ -262,7 +255,8 @@ def train(
     labels: dask.array or dask.dataframe
     dmatrix_kwargs: Keywords to give to Xgboost DMatrix
     evals_result: dict
-        Stores the evaluation result history of all the items in the eval_set.
+        Stores the evaluation result history of all the items in the eval_set
+        by mutating evals_result in place.
     **kwargs: Keywords to give to XGBoost train
 
     Examples

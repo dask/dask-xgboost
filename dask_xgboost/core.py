@@ -124,11 +124,6 @@ def _package_evals(
     eval_set, sample_weight_eval_set=None, missing=None, n_jobs=None
 ):
     if eval_set is not None:
-        if any(is_dask_collection(e) for evals in eval_set for e in evals):
-            raise TypeError(
-                "Evaluation set must not contain dask collections."
-            )
-
         if sample_weight_eval_set is None:
             sample_weight_eval_set = [None] * len(eval_set)
         evals = list(
@@ -186,6 +181,16 @@ def _train(
     for part in parts:
         if part.status == "error":
             yield part  # trigger error locally
+
+    if kwargs.get("eval_set"):
+        if any(
+            is_dask_collection(e)
+            for evals in kwargs.get("eval_set")
+            for e in evals
+        ):
+            raise TypeError(
+                "Evaluation set must not contain dask collections."
+            )
 
     # Because XGBoost-python doesn't yet allow iterative training, we need to
     # find the locations of all chunks and map them to particular Dask workers

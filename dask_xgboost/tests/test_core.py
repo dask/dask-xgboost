@@ -159,13 +159,6 @@ def test_package_evals():
 
     assert len(evals) == 1
 
-    X2 = da.from_array(X_test, 5)
-    y2 = da.from_array(y_test, 5)
-
-    with pytest.raises(TypeError) as info:
-        _package_evals(eval_set=[(X2, y2)])
-
-    assert "Evaluation set must not contain dask collections." in str(info.value)
 
 @pytest.mark.parametrize("kind", ["array", "dataframe"])
 def test_classifier_multi(kind, loop):  # noqa: F811
@@ -433,3 +426,19 @@ def test_classifier_evals_result(loop):  # noqa
     b = xgb.XGBClassifier()
     b.fit(X, y, eval_metric="rmse", eval_set=[(X, y)])
     assert_eq(evals_result, b.evals_result())
+
+
+@gen_cluster(client=True, timeout=None)
+def test_eval_set_dask_collection_exception(c, s, a, b):
+    ddf = dd.from_pandas(df, npartitions=4)
+    dlabels = dd.from_pandas(labels, npartitions=4)
+
+    X2 = da.from_array(X, 5)
+    y2 = da.from_array(y, 5)
+
+    with pytest.raises(TypeError) as info:
+        yield dxgb.train(c, param, ddf, dlabels, eval_set=[(X2, y2)])
+
+    assert "Evaluation set must not contain dask collections." in str(
+        info.value
+    )

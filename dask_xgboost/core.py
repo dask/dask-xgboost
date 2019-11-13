@@ -124,6 +124,18 @@ def _package_evals(
     eval_set, sample_weight_eval_set=None, missing=None, n_jobs=None
 ):
     if eval_set is not None:
+        eval_set_dask_collections = [
+            type(e)
+            for evals in eval_set
+            for e in evals
+            if isinstance(e, (da.Array, dd.DataFrame, dd.Series))
+        ]
+        if len(eval_set_dask_collections) > 0:
+            raise TypeError(
+                "Evaluation set must not contain dask collection"
+                ". Got %s" % eval_set_dask_collections
+            )
+
         if sample_weight_eval_set is None:
             sample_weight_eval_set = [None] * len(eval_set)
         evals = list(

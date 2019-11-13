@@ -159,7 +159,7 @@ def _package_evals(
 
 
 @gen.coroutine
-def _train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
+def _train(client, params, data, labels, dmatrix_kwargs={}, evals_result=None, **kwargs):
     """
     Asynchronous version of train
 
@@ -218,14 +218,18 @@ def _train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
 
     # Get the results, only one will be non-None
     results = yield client._gather(futures)
-    result, evals_result = [v for v in results if v.count(None) != len(v)][0]
+    result, _evals_result = [v for v in results if v.count(None) != len(v)][0]
+
+    if evals_result is not None:
+        evals_result.update(_evals_result)
+
     num_class = params.get("num_class")
     if num_class:
         result.set_attr(num_class=str(num_class))
-    raise gen.Return((result, evals_result))
+    raise gen.Return(result)
 
 
-def train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
+def train(client, params, data, labels, dmatrix_kwargs={}, evals_result=None, **kwargs):
     """ Train an XGBoost model on a Dask Cluster
 
     This starts XGBoost on all Dask workers, moves input data to those workers,
@@ -255,7 +259,7 @@ def train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
     predict
     """
     return client.sync(
-        _train, client, params, data, labels, dmatrix_kwargs, **kwargs
+        _train, client, params, data, labels, dmatrix_kwargs, evals_result, **kwargs
     )
 
 
@@ -396,7 +400,8 @@ class XGBRegressor(xgb.XGBRegressor):
             else:
                 xgb_options.update({"eval_metric": eval_metric})
 
-        self._Booster, self.evals_result_ = train(
+        self.evals_result_ = {}
+        self._Booster = train(
             client,
             xgb_options,
             X,
@@ -406,6 +411,7 @@ class XGBRegressor(xgb.XGBRegressor):
             missing=self.missing,
             n_jobs=self.n_jobs,
             early_stopping_rounds=early_stopping_rounds,
+            evals_result=self.evals_result_,
         )
 
         if early_stopping_rounds is not None:
@@ -526,7 +532,8 @@ class XGBClassifier(xgb.XGBClassifier):
         # that will require a dependency on dask-ml
         # TODO: sample weight
 
-        self._Booster, self.evals_result_ = train(
+        self.evals_result_ = {}
+        self._Booster = train(
             client,
             xgb_options,
             X,
@@ -536,6 +543,7 @@ class XGBClassifier(xgb.XGBClassifier):
             missing=self.missing,
             n_jobs=self.n_jobs,
             early_stopping_rounds=early_stopping_rounds,
+            evals_result=self.evals_result_,
         )
 
         if early_stopping_rounds is not None:

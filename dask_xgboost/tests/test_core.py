@@ -136,7 +136,7 @@ def test_package_evals():
     X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=0)
 
     evals = _package_evals(
-        [(X_test, y_test), (X, y_test)],
+        [(X_test, y_test), (X, y_test)]
     )
 
     assert len(evals) == 2
@@ -233,8 +233,8 @@ def test_basic(c, s, a, b):
 
     ddf = dd.from_pandas(df, npartitions=4)
     dlabels = dd.from_pandas(labels, npartitions=4)
-    dbst, evals_result = yield dxgb.train(c, param, ddf, dlabels)
-    dbst, evals_result = yield dxgb.train(c, param, ddf, dlabels)  # we can do this twice
+    dbst = yield dxgb.train(c, param, ddf, dlabels)
+    dbst = yield dxgb.train(c, param, ddf, dlabels)  # we can do this twice
 
     result = bst.predict(dtrain)
     dresult = dbst.predict(dtrain)
@@ -256,7 +256,7 @@ def test_dmatrix_kwargs(c, s, a, b):
     xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2))
     dy = da.from_array(y, chunks=(2,))
-    dbst, evals_result = yield dxgb.train(c, param, dX, dy, {"missing": 0.0})
+    dbst = yield dxgb.train(c, param, dX, dy, dmatrix_kwargs={"missing": 0.0})
 
     # Distributed model matches local model with dmatrix kwargs
     dtrain = xgb.DMatrix(X, label=y, missing=0.0)
@@ -291,8 +291,8 @@ def test_numpy(c, s, a, b):
     xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2))
     dy = da.from_array(y, chunks=(2,))
-    dbst, evals_result = yield dxgb.train(c, param, dX, dy)
-    dbst, evals_result = yield dxgb.train(c, param, dX, dy)  # we can do this twice
+    dbst = yield dxgb.train(c, param, dX, dy)
+    dbst = yield dxgb.train(c, param, dX, dy)  # we can do this twice
 
     predictions = dxgb.predict(c, dbst, dX)
     assert isinstance(predictions, da.Array)
@@ -305,8 +305,8 @@ def test_scipy_sparse(c, s, a, b):
     xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2)).map_blocks(scipy.sparse.csr_matrix)
     dy = da.from_array(y, chunks=(2,))
-    dbst, evals_result = yield dxgb.train(c, param, dX, dy)
-    dbst, evals_result = yield dxgb.train(c, param, dX, dy)  # we can do this twice
+    dbst = yield dxgb.train(c, param, dX, dy)
+    dbst = yield dxgb.train(c, param, dX, dy)  # we can do this twice
 
     predictions = dxgb.predict(c, dbst, dX)
     assert isinstance(predictions, da.Array)
@@ -320,8 +320,8 @@ def test_sparse(c, s, a, b):
     xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2)).map_blocks(scipy.sparse.csr_matrix)
     dy = da.from_array(y, chunks=(2,))
-    dbst, evals_result = yield dxgb.train(c, param, dX, dy)
-    dbst, evals_result = yield dxgb.train(c, param, dX, dy)  # we can do this twice
+    dbst = yield dxgb.train(c, param, dX, dy)
+    dbst = yield dxgb.train(c, param, dX, dy)  # we can do this twice
 
     predictions = dxgb.predict(c, dbst, dX)
     assert isinstance(predictions, da.Array)
@@ -340,7 +340,7 @@ def test_synchronous_api(loop):  # noqa
     with cluster() as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
 
-            dbst, evals_result = dxgb.train(c, param, ddf, dlabels)
+            dbst = dxgb.train(c, param, ddf, dlabels)
 
             result = bst.predict(dtrain)
             dresult = dbst.predict(dtrain)
@@ -393,6 +393,7 @@ async def test_predict_proba(c, s, a, b):
     expected = booster.predict(xgb.DMatrix(XX_))
     np.testing.assert_array_equal(result, expected)
 
+
 def test_regressor_evals_result(loop):  # noqa
     with cluster() as (s, [a, b]):
         with Client(s["address"], loop=loop):
@@ -405,6 +406,7 @@ def test_regressor_evals_result(loop):  # noqa
     b = xgb.XGBRegressor()
     b.fit(X, y, eval_metric="rmse", eval_set=[(X, y)])
     assert_eq(evals_result, b.evals_result())
+
 
 def test_classifier_evals_result(loop):  # noqa
     with cluster() as (s, [a, b]):

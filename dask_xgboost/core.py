@@ -243,6 +243,8 @@ def train(client, params, data, labels, dmatrix_kwargs={}, evals_result=None, **
     data: dask array or dask.dataframe
     labels: dask.array or dask.dataframe
     dmatrix_kwargs: Keywords to give to Xgboost DMatrix
+    evals_result: dict
+        Stores the evaluation result history of all the items in the eval_set.
     **kwargs: Keywords to give to XGBoost train
 
     Examples

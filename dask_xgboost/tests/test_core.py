@@ -24,11 +24,19 @@ distributed.comm.utils._offload_executor = ThreadPoolExecutor(max_workers=2)
 
 
 df = pd.DataFrame(
-    {"x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "y": [1, 0, 1, 0, 1, 0, 1, 0, 1, 0]}
+    {
+        "x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        "y": [1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
+    }
 )
 labels = pd.Series([1, 0, 1, 0, 1, 0, 1, 1, 1, 1])
 
-param = {"max_depth": 2, "eta": 1, "silent": 1, "objective": "binary:logistic"}
+param = {
+    "max_depth": 2,
+    "eta": 1,
+    "silent": 1,
+    "objective": "binary:logistic",
+}
 
 X = df.values
 y = labels.values
@@ -135,22 +143,18 @@ def test_package_evals():
     y = digits["target"]
     X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=0)
 
+    evals = _package_evals([(X_test, y_test), (X, y_test)])
+
+    assert len(evals) == 2
+
     evals = _package_evals(
-        [(X_test, y_test), (X, y_test)],
+        [(X_test, y_test), (X, y_test)], sample_weight_eval_set=[[1], [2]]
     )
 
     assert len(evals) == 2
 
     evals = _package_evals(
-        [(X_test, y_test), (X, y_test)],
-        sample_weight_eval_set=[[1], [2]],
-    )
-
-    assert len(evals) == 2
-
-    evals = _package_evals(
-        [(X_test, y_test), (X, y_test)],
-        sample_weight_eval_set=[[1]],
+        [(X_test, y_test), (X, y_test)], sample_weight_eval_set=[[1]]
     )
 
     assert len(evals) == 1
@@ -221,7 +225,9 @@ def test_regressor_with_early_stopping(loop):  # noqa
             p1 = a.predict(X2)
 
     b = xgb.XGBRegressor()
-    b.fit(X, y, early_stopping_rounds=4, eval_metric="rmse", eval_set=[(X, y)])
+    b.fit(
+        X, y, early_stopping_rounds=4, eval_metric="rmse", eval_set=[(X, y)]
+    )
     assert_eq(p1, b.predict(X))
     assert_eq(a.best_score, b.best_score)
 
@@ -381,7 +387,7 @@ async def test_predict_proba(c, s, a, b):
     np.testing.assert_array_equal(result, expected)
 
     # dataframe
-    XX = dd.from_dask_array(X, columns=['A', 'B'])
+    XX = dd.from_dask_array(X, columns=["A", "B"])
     yy = dd.from_dask_array(y)
     XX_ = await c.compute(XX)
 

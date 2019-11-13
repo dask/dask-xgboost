@@ -159,7 +159,15 @@ def _package_evals(
 
 
 @gen.coroutine
-def _train(client, params, data, labels, dmatrix_kwargs={}, evals_result=None, **kwargs):
+def _train(
+    client,
+    params,
+    data,
+    labels,
+    dmatrix_kwargs={},
+    evals_result=None,
+    **kwargs
+):
     """
     Asynchronous version of train
 
@@ -189,7 +197,9 @@ def _train(client, params, data, labels, dmatrix_kwargs={}, evals_result=None, *
     # Because XGBoost-python doesn't yet allow iterative training, we need to
     # find the locations of all chunks and map them to particular Dask workers
     key_to_part_dict = dict([(part.key, part) for part in parts])
-    who_has = yield client.scheduler.who_has(keys=[part.key for part in parts])
+    who_has = yield client.scheduler.who_has(
+        keys=[part.key for part in parts]
+    )
     worker_map = defaultdict(list)
     for key, workers in who_has.items():
         worker_map[first(workers)].append(key_to_part_dict[key])
@@ -229,7 +239,15 @@ def _train(client, params, data, labels, dmatrix_kwargs={}, evals_result=None, *
     raise gen.Return(result)
 
 
-def train(client, params, data, labels, dmatrix_kwargs={}, evals_result=None, **kwargs):
+def train(
+    client,
+    params,
+    data,
+    labels,
+    dmatrix_kwargs={},
+    evals_result=None,
+    **kwargs
+):
     """ Train an XGBoost model on a Dask Cluster
 
     This starts XGBoost on all Dask workers, moves input data to those workers,
@@ -261,7 +279,14 @@ def train(client, params, data, labels, dmatrix_kwargs={}, evals_result=None, **
     predict
     """
     return client.sync(
-        _train, client, params, data, labels, dmatrix_kwargs, evals_result, **kwargs
+        _train,
+        client,
+        params,
+        data,
+        labels,
+        dmatrix_kwargs,
+        evals_result,
+        **kwargs
     )
 
 

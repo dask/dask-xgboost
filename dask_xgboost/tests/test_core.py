@@ -136,7 +136,7 @@ def test_package_evals():
     X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=0)
 
     evals = _package_evals(
-        [(X_test, y_test), (X, y_test)]
+        [(X_test, y_test), (X, y_test)],
     )
 
     assert len(evals) == 2

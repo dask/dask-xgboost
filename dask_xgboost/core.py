@@ -552,7 +552,6 @@ class XGBClassifier(xgb.XGBClassifier):
             self.best_score = self._Booster.best_score
             self.best_iteration = self._Booster.best_iteration
             self.best_ntree_limit = self._Booster.best_ntree_limit
-
         return self
 
     def predict(self, X):

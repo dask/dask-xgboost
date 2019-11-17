@@ -30,7 +30,7 @@ Example
    >>> bst  # Get back normal XGBoost result
    <xgboost.core.Booster at ... >
 
-   predictions = dxgb.predict(client, bsg, data_test)
+   predictions = dxgb.predict(client, bst, data_test)
 
 
 How this works

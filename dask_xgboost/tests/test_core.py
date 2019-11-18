@@ -24,11 +24,19 @@ distributed.comm.utils._offload_executor = ThreadPoolExecutor(max_workers=2)
 
 
 df = pd.DataFrame(
-    {"x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "y": [1, 0, 1, 0, 1, 0, 1, 0, 1, 0]}
+    {
+        "x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        "y": [1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
+    }
 )
 labels = pd.Series([1, 0, 1, 0, 1, 0, 1, 1, 1, 1])
 
-param = {"max_depth": 2, "eta": 1, "silent": 1, "objective": "binary:logistic"}
+param = {
+    "max_depth": 2,
+    "eta": 1,
+    "silent": 1,
+    "objective": "binary:logistic",
+}
 
 X = df.values
 y = labels.values
@@ -135,22 +143,18 @@ def test_package_evals():
     y = digits["target"]
     X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=0)
 
+    evals = _package_evals([(X_test, y_test), (X, y_test)])
+
+    assert len(evals) == 2
+
     evals = _package_evals(
-        [(X_test, y_test), (X, y_test)],
+        [(X_test, y_test), (X, y_test)], sample_weight_eval_set=[[1], [2]]
     )
 
     assert len(evals) == 2
 
     evals = _package_evals(
-        [(X_test, y_test), (X, y_test)],
-        sample_weight_eval_set=[[1], [2]],
-    )
-
-    assert len(evals) == 2
-
-    evals = _package_evals(
-        [(X_test, y_test), (X, y_test)],
-        sample_weight_eval_set=[[1]],
+        [(X_test, y_test), (X, y_test)], sample_weight_eval_set=[[1]]
     )
 
     assert len(evals) == 1
@@ -221,7 +225,9 @@ def test_regressor_with_early_stopping(loop):  # noqa
             p1 = a.predict(X2)
 
     b = xgb.XGBRegressor()
-    b.fit(X, y, early_stopping_rounds=4, eval_metric="rmse", eval_set=[(X, y)])
+    b.fit(
+        X, y, early_stopping_rounds=4, eval_metric="rmse", eval_set=[(X, y)]
+    )
     assert_eq(p1, b.predict(X))
     assert_eq(a.best_score, b.best_score)
 
@@ -256,7 +262,7 @@ def test_dmatrix_kwargs(c, s, a, b):
     xgb.rabit.init()  # workaround for "Doing rabit call after Finalize"
     dX = da.from_array(X, chunks=(2, 2))
     dy = da.from_array(y, chunks=(2,))
-    dbst = yield dxgb.train(c, param, dX, dy, {"missing": 0.0})
+    dbst = yield dxgb.train(c, param, dX, dy, dmatrix_kwargs={"missing": 0.0})
 
     # Distributed model matches local model with dmatrix kwargs
     dtrain = xgb.DMatrix(X, label=y, missing=0.0)
@@ -381,7 +387,7 @@ async def test_predict_proba(c, s, a, b):
     np.testing.assert_array_equal(result, expected)
 
     # dataframe
-    XX = dd.from_dask_array(X, columns=['A', 'B'])
+    XX = dd.from_dask_array(X, columns=["A", "B"])
     yy = dd.from_dask_array(y)
     XX_ = await c.compute(XX)
 
@@ -392,3 +398,47 @@ async def test_predict_proba(c, s, a, b):
     result = clf.predict_proba(XX_)
     expected = booster.predict(xgb.DMatrix(XX_))
     np.testing.assert_array_equal(result, expected)
+
+
+def test_regressor_evals_result(loop):  # noqa
+    with cluster() as (s, [a, b]):
+        with Client(s["address"], loop=loop):
+            a = dxgb.XGBRegressor()
+            X2 = da.from_array(X, 5)
+            y2 = da.from_array(y, 5)
+            a.fit(X2, y2, eval_metric="rmse", eval_set=[(X, y)])
+            evals_result = a.evals_result()
+
+    b = xgb.XGBRegressor()
+    b.fit(X, y, eval_metric="rmse", eval_set=[(X, y)])
+    assert_eq(evals_result, b.evals_result())
+
+
+def test_classifier_evals_result(loop):  # noqa
+    with cluster() as (s, [a, b]):
+        with Client(s["address"], loop=loop):
+            a = dxgb.XGBClassifier()
+            X2 = da.from_array(X, 5)
+            y2 = da.from_array(y, 5)
+            a.fit(X2, y2, eval_metric="rmse", eval_set=[(X, y)])
+            evals_result = a.evals_result()
+
+    b = xgb.XGBClassifier()
+    b.fit(X, y, eval_metric="rmse", eval_set=[(X, y)])
+    assert_eq(evals_result, b.evals_result())
+
+
+@gen_cluster(client=True, timeout=None)
+def test_eval_set_dask_collection_exception(c, s, a, b):
+    ddf = dd.from_pandas(df, npartitions=4)
+    dlabels = dd.from_pandas(labels, npartitions=4)
+
+    X2 = da.from_array(X, 5)
+    y2 = da.from_array(y, 5)
+
+    with pytest.raises(TypeError) as info:
+        yield dxgb.train(c, param, ddf, dlabels, eval_set=[(X2, y2)])
+
+    assert "Evaluation set must not contain dask collections." in str(
+        info.value
+    )

@@ -7,7 +7,7 @@ import dask.dataframe as dd
 import numpy as np
 import pandas as pd
 import xgboost as xgb
-from dask import delayed
+from dask import delayed, is_dask_collection
 from dask.distributed import default_client, wait
 from toolz import assoc, first
 from tornado import gen
@@ -103,17 +103,21 @@ def train_part(
     args = [("%s=%s" % item).encode() for item in env.items()]
     xgb.rabit.init(args)
     try:
+        local_history = {}
         logger.info("Starting Rabit, Rank %d", xgb.rabit.get_rank())
-
-        bst = xgb.train(param, dtrain, evals=evals, **kwargs)
+        bst = xgb.train(
+            param, dtrain, evals=evals, evals_result=local_history, **kwargs
+        )
 
         if xgb.rabit.get_rank() == 0:  # Only return from one worker
             result = bst
+            evals_result = local_history
         else:
             result = None
+            evals_result = None
     finally:
         xgb.rabit.finalize()
-    return result
+    return result, evals_result
 
 
 def _package_evals(
@@ -143,7 +147,15 @@ def _package_evals(
 
 
 @gen.coroutine
-def _train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
+def _train(
+    client,
+    params,
+    data,
+    labels,
+    dmatrix_kwargs={},
+    evals_result=None,
+    **kwargs
+):
     """
     Asynchronous version of train
 
@@ -170,10 +182,22 @@ def _train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
         if part.status == "error":
             yield part  # trigger error locally
 
+    if kwargs.get("eval_set"):
+        if any(
+            is_dask_collection(e)
+            for evals in kwargs.get("eval_set")
+            for e in evals
+        ):
+            raise TypeError(
+                "Evaluation set must not contain dask collections."
+            )
+
     # Because XGBoost-python doesn't yet allow iterative training, we need to
     # find the locations of all chunks and map them to particular Dask workers
     key_to_part_dict = dict([(part.key, part) for part in parts])
-    who_has = yield client.scheduler.who_has(keys=[part.key for part in parts])
+    who_has = yield client.scheduler.who_has(
+        keys=[part.key for part in parts]
+    )
     worker_map = defaultdict(list)
     for key, workers in who_has.items():
         worker_map[first(workers)].append(key_to_part_dict[key])
@@ -202,14 +226,26 @@ def _train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
 
     # Get the results, only one will be non-None
     results = yield client._gather(futures)
-    result = [v for v in results if v][0]
+    result, _evals_result = [v for v in results if v.count(None) != len(v)][0]
+
+    if evals_result is not None:
+        evals_result.update(_evals_result)
+
     num_class = params.get("num_class")
     if num_class:
         result.set_attr(num_class=str(num_class))
     raise gen.Return(result)
 
 
-def train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
+def train(
+    client,
+    params,
+    data,
+    labels,
+    dmatrix_kwargs={},
+    evals_result=None,
+    **kwargs
+):
     """ Train an XGBoost model on a Dask Cluster
 
     This starts XGBoost on all Dask workers, moves input data to those workers,
@@ -223,6 +259,9 @@ def train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
     data: dask array or dask.dataframe
     labels: dask.array or dask.dataframe
     dmatrix_kwargs: Keywords to give to Xgboost DMatrix
+    evals_result: dict, optional
+        Stores the evaluation result history of all the items in the eval_set
+        by mutating evals_result in place.
     **kwargs: Keywords to give to XGBoost train
 
     Examples
@@ -239,7 +278,14 @@ def train(client, params, data, labels, dmatrix_kwargs={}, **kwargs):
     predict
     """
     return client.sync(
-        _train, client, params, data, labels, dmatrix_kwargs, **kwargs
+        _train,
+        client,
+        params,
+        data,
+        labels,
+        dmatrix_kwargs,
+        evals_result,
+        **kwargs
     )
 
 
@@ -380,6 +426,7 @@ class XGBRegressor(xgb.XGBRegressor):
             else:
                 xgb_options.update({"eval_metric": eval_metric})
 
+        self.evals_result_ = {}
         self._Booster = train(
             client,
             xgb_options,
@@ -390,6 +437,7 @@ class XGBRegressor(xgb.XGBRegressor):
             missing=self.missing,
             n_jobs=self.n_jobs,
             early_stopping_rounds=early_stopping_rounds,
+            evals_result=self.evals_result_,
         )
 
         if early_stopping_rounds is not None:
@@ -510,6 +558,7 @@ class XGBClassifier(xgb.XGBClassifier):
         # that will require a dependency on dask-ml
         # TODO: sample weight
 
+        self.evals_result_ = {}
         self._Booster = train(
             client,
             xgb_options,
@@ -520,6 +569,7 @@ class XGBClassifier(xgb.XGBClassifier):
             missing=self.missing,
             n_jobs=self.n_jobs,
             early_stopping_rounds=early_stopping_rounds,
+            evals_result=self.evals_result_,
         )
 
         if early_stopping_rounds is not None:

@@ -169,6 +169,7 @@ class RabitTracker(object):
         sock = socket.socket(get_family(hostIP), socket.SOCK_STREAM)
         for port in range(port, port_end):
             try:
+                logging.info('Binding Rabit tracker %s:%d', hostIP, port)
                 sock.bind((hostIP, port))
                 self.port = port
                 break
@@ -176,6 +177,7 @@ class RabitTracker(object):
                 if e.errno in [98, 48]:
                     continue
                 else:
+                    logging.error(e, exc_info=True)
                     raise
         sock.listen(256)
         self.sock = sock

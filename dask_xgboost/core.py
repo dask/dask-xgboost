@@ -16,11 +16,13 @@ from .tracker import RabitTracker, get_host_ip
 
 try:
     import sparse
-    import scipy.sparse as ss
 except ImportError:
     sparse = False
-    ss = False
 
+try:
+    import scipy.sparse as ss
+except ImportError:
+    ss = False
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +56,7 @@ def concat(L):
         return np.concatenate(L, axis=0)
     elif isinstance(L[0], (pd.DataFrame, pd.Series)):
         return pd.concat(L, axis=0)
-    elif ss and isinstance(L[0], ss.spmatrix):
+    elif ss and isinstance(L[0], ss.csr_matrix):
         return ss.vstack(L, format="csr")
     elif sparse and isinstance(L[0], sparse.SparseArray):
         return sparse.concatenate(L, axis=0)

@@ -4,7 +4,7 @@ jobs:
     docker:
       - image: continuumio/miniconda:latest
     environment:
-      PYTHON: "3.6"
+      PYTHON: "3.7"
     steps:
       - checkout
       - run:
@@ -14,24 +14,23 @@ jobs:
             conda update -q conda
             conda install conda-build anaconda-client --yes
             conda config --add channels conda-forge
-            conda create -q -n test-environment python=${PYTHON}
-            source activate test-environment
-            conda install -c defaults -c conda-forge -q coverage flake8 pytest pytest-cov pytest-xdist numpy pandas xgboost dask distributed scikit-learn sparse scipy 'pytest-asyncio>=0.10.0'
+            conda env create -f ci/environment-${PYTHON}.yaml
+            conda activate dask-xgboost-test
             pip install --no-deps -e .
-            conda list test-environment
+            conda list dask-xgboost-test
       - run:
           # TODO: Check on the conda-forge recipe for why this is nescessary
           command: |
-            source activate test-environment
+            conda activate dask-xgboost-test
       - run:
           command: |
-            source activate test-environment
+            conda activate dask-xgboost-test
             pytest -v -s dask_xgboost
       - run:
           command: |
-            source activate test-environment
+            conda activate dask-xgboost-test
             flake8 dask_xgboost
       - run:
           command: |
-            source activate test-environment
+            conda activate dask-xgboost-test
             black .

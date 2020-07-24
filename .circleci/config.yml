@@ -15,22 +15,22 @@ jobs:
             conda install conda-build anaconda-client --yes
             conda config --add channels conda-forge
             conda env create -f ci/environment-${PYTHON}.yaml
-            conda activate dask-xgboost-test
+            source activate dask-xgboost-test
             pip install --no-deps -e .
             conda list dask-xgboost-test
       - run:
           # TODO: Check on the conda-forge recipe for why this is nescessary
           command: |
-            conda activate dask-xgboost-test
+            source activate dask-xgboost-test
       - run:
           command: |
-            conda activate dask-xgboost-test
+            source activate dask-xgboost-test
             pytest -v -s dask_xgboost
       - run:
           command: |
-            conda activate dask-xgboost-test
+            source activate dask-xgboost-test
             flake8 dask_xgboost
       - run:
           command: |
-            conda activate dask-xgboost-test
+            source activate dask-xgboost-test
             black .

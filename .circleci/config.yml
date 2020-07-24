@@ -31,3 +31,7 @@ jobs:
           command: |
             source activate test-environment
             flake8 dask_xgboost
+      - run:
+          command: |
+            source activate test-environment
+            black .

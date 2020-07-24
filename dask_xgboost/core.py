@@ -125,27 +125,17 @@ def train_part(
     return result, evals_result
 
 
-def _package_evals(
-    eval_set, sample_weight_eval_set=None, missing=None, n_jobs=None
-):
+def _package_evals(eval_set, sample_weight_eval_set=None, missing=None, n_jobs=None):
     if eval_set is not None:
         if sample_weight_eval_set is None:
             sample_weight_eval_set = [None] * len(eval_set)
         evals = list(
             xgb.DMatrix(
-                data,
-                label=label,
-                missing=missing,
-                weight=weight,
-                nthread=n_jobs,
+                data, label=label, missing=missing, weight=weight, nthread=n_jobs,
             )
-            for ((data, label), weight) in zip(
-                eval_set, sample_weight_eval_set
-            )
+            for ((data, label), weight) in zip(eval_set, sample_weight_eval_set)
         )
-        evals = list(
-            zip(evals, ["validation_{}".format(i) for i in range(len(evals))])
-        )
+        evals = list(zip(evals, ["validation_{}".format(i) for i in range(len(evals))]))
     else:
         evals = ()
     return evals
@@ -194,7 +184,8 @@ def _train(
             assert sample_weight_parts.ndim == 1 or sample_weight_parts.shape[1] == 1
             sample_weight_parts = sample_weight_parts.flatten().tolist()
     else:
-        # If sample_weight is None construct a list of Nones to keep the structure of parts consistent.
+        # If sample_weight is None construct a list of Nones to keep
+        # the structure of parts consistent.
         sample_weight_parts = [None] * len(data_parts)
 
     # Arrange parts into triads.  This enforces co-locality
@@ -210,15 +201,14 @@ def _train(
         kwargs.get("eval_set", []), "Evaluation set must not contain dask collections."
     )
     _has_dask_collections(
-        kwargs.get("sample_weight_eval_set", []), "Sample weight evaluation set must not contain dask collections."
+        kwargs.get("sample_weight_eval_set", []),
+        "Sample weight evaluation set must not contain dask collections.",
     )
 
     # Because XGBoost-python doesn't yet allow iterative training, we need to
     # find the locations of all chunks and map them to particular Dask workers
     key_to_part_dict = dict([(part.key, part) for part in parts])
-    who_has = yield client.scheduler.who_has(
-        keys=[part.key for part in parts]
-    )
+    who_has = yield client.scheduler.who_has(keys=[part.key for part in parts])
     worker_map = defaultdict(list)
     for key, workers in who_has.items():
         worker_map[first(workers)].append(key_to_part_dict[key])
@@ -361,14 +351,10 @@ def predict(client, model, data):
         num_class = int(num_class)
 
         if num_class > 2:
-            kwargs = dict(
-                drop_axis=None, chunks=(data.chunks[0], (num_class,))
-            )
+            kwargs = dict(drop_axis=None, chunks=(data.chunks[0], (num_class,)))
         else:
             kwargs = dict(drop_axis=1)
-        result = data.map_blocks(
-            _predict_part, model=model, dtype=np.float32, **kwargs
-        )
+        result = data.map_blocks(_predict_part, model=model, dtype=np.float32, **kwargs)
     else:
         model = model.result()  # Future to concrete
         if not isinstance(data, xgb.DMatrix):
@@ -615,8 +601,6 @@ class XGBClassifier(xgb.XGBClassifier):
     def predict_proba(self, data, ntree_limit=None):
         client = default_client()
         if ntree_limit is not None:
-            raise NotImplementedError(
-                "'ntree_limit' is not currently " "supported."
-            )
+            raise NotImplementedError("'ntree_limit' is not currently " "supported.")
         class_probs = predict(client, self._Booster, data)
         return class_probs

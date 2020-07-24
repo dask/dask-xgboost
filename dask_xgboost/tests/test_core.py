@@ -54,6 +54,17 @@ def test_classifier(loop):  # noqa
     assert_eq(p1, b.predict(X))
 
 
+def test_classifier_different_chunks(loop):  # noqa
+    with cluster() as (s, [a, b]):
+        with Client(s["address"], loop=loop):
+            a = dxgb.XGBClassifier()
+            X2 = da.from_array(X, 5)
+            y2 = da.from_array(y, 4)
+
+            with pytest.raises(ValueError):
+                a.fit(X2, y2)
+
+
 def test_multiclass_classifier(loop):  # noqa
     # data
     iris = load_iris()

@@ -190,6 +190,11 @@ def _train(
         # the structure of parts consistent.
         sample_weight_parts = [None] * len(data_parts)
 
+    # Check that data, labels, and sample_weights are the same length
+    lists = [data_parts, label_parts, sample_weight_parts]
+    if len(set([len(l) for l in lists])) > 1:
+        raise ValueError('data, label, and sample_weight parts/chunks must have same length.')
+
     # Arrange parts into triads.  This enforces co-locality
     parts = list(map(delayed, zip(data_parts, label_parts, sample_weight_parts)))
     parts = client.compute(parts)  # Start computation in the background

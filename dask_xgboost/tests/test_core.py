@@ -160,6 +160,58 @@ def test_package_evals():
     assert len(evals) == 1
 
 
+def test_validation_weights_xgbclassifier(loop):
+    from sklearn.datasets import make_hastie_10_2
+
+    # prepare training and test data
+    X, y = make_hastie_10_2(n_samples=2000, random_state=42)
+    labels, y = np.unique(y, return_inverse=True)
+
+    param_dist = {'objective': 'binary:logistic', 'n_estimators': 2,
+                  'random_state': 123}
+
+    with cluster() as (s, [a, b]):
+        with Client(s["address"], loop=loop):
+            X_train, X_test = X[:1600], X[1600:]
+            y_train, y_test = y[:1600], y[1600:]
+
+            dX_train = da.from_array(X_train)
+            dy_train = da.from_array(y_train)
+
+            # instantiate model
+            clf = dxgb.XGBClassifier(**param_dist)
+
+            # train it using instance weights only in the training set
+            weights_train = np.random.choice([1, 2], len(X_train))
+            weights_train = da.from_array(weights_train)
+            clf.fit(dX_train, dy_train,
+                    sample_weight=weights_train,
+                    eval_set=[(X_test, y_test)],
+                    eval_metric='logloss')
+
+            # evaluate logloss metric on test set *without* using weights
+            evals_result_without_weights = clf.evals_result()
+            logloss_without_weights = evals_result_without_weights[
+                "validation_0"]["logloss"]
+
+            # now use weights for the test set
+            np.random.seed(0)
+            weights_test = np.random.choice([1, 2], len(X_test))
+            #weights_test = da.from_array(weights_test)
+            clf.fit(dX_train, dy_train,
+                    sample_weight=weights_train,
+                    eval_set=[(X_test, y_test)],
+                    sample_weight_eval_set=[weights_test],
+                    eval_metric='logloss')
+            evals_result_with_weights = clf.evals_result()
+            logloss_with_weights = evals_result_with_weights["validation_0"]["logloss"]
+
+    # check that the logloss in the test set is actually different
+    # when using weights than when not using them
+    assert all((logloss_with_weights[i] != logloss_without_weights[i]
+                for i in [0, 1]))
+
+
 @pytest.mark.parametrize("kind", ["array", "dataframe"])
 def test_classifier_multi(kind, loop):  # noqa: F811
 
@@ -440,5 +492,21 @@ def test_eval_set_dask_collection_exception(c, s, a, b):
         yield dxgb.train(c, param, ddf, dlabels, eval_set=[(X2, y2)])
 
     assert "Evaluation set must not contain dask collections." in str(
+        info.value
+    )
+
+
+@gen_cluster(client=True, timeout=None)
+def test_sample_weight_eval_set_dask_collection_exception(c, s, a, b):
+    ddf = dd.from_pandas(df, npartitions=4)
+    dlabels = dd.from_pandas(labels, npartitions=4)
+
+    X2 = da.from_array(X, 5)
+    y2 = da.from_array(y, 5)
+
+    with pytest.raises(TypeError) as info:
+        yield dxgb.train(c, param, ddf, dlabels, sample_weight_eval_set=[(X2, y2)])
+
+    assert "Sample weight evaluation set must not contain dask collections." in str(
         info.value
     )

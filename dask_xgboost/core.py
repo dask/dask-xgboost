@@ -86,14 +86,16 @@ def train_part(
     -------
     model if rank zero, None otherwise
     """
-    data, labels = zip(*list_of_parts)  # Prepare data
+    data, labels, sample_weight = zip(*list_of_parts)  # Prepare data
     data = concat(data)  # Concatenate many parts into one
     labels = concat(labels)
+    sample_weight = concat(sample_weight) if np.all(sample_weight) else None
+
     if dmatrix_kwargs is None:
         dmatrix_kwargs = {}
 
     dmatrix_kwargs["feature_names"] = getattr(data, "columns", None)
-    dtrain = xgb.DMatrix(data, labels, **dmatrix_kwargs)
+    dtrain = xgb.DMatrix(data, labels, weight=sample_weight, **dmatrix_kwargs)
 
     evals = _package_evals(
         eval_set,
@@ -149,6 +151,16 @@ def _package_evals(
     return evals
 
 
+def _has_dask_collections(list_of_collections, message):
+    list_of_collections = list_of_collections or []
+    if any(
+        is_dask_collection(collection)
+        for collections in list_of_collections
+        for collection in collections
+    ):
+        raise TypeError(message)
+
+
 @gen.coroutine
 def _train(
     client,
@@ -157,6 +169,7 @@ def _train(
     labels,
     dmatrix_kwargs={},
     evals_result=None,
+    sample_weight=None,
     **kwargs
 ):
     """
@@ -175,9 +188,17 @@ def _train(
     if isinstance(label_parts, np.ndarray):
         assert label_parts.ndim == 1 or label_parts.shape[1] == 1
         label_parts = label_parts.flatten().tolist()
+    if sample_weight is not None:
+        sample_weight_parts = sample_weight.to_delayed()
+        if isinstance(sample_weight_parts, np.ndarray):
+            assert sample_weight_parts.ndim == 1 or sample_weight_parts.shape[1] == 1
+            sample_weight_parts = sample_weight_parts.flatten().tolist()
+    else:
+        # If sample_weight is None construct a list of Nones to keep the structure of parts consistent.
+        sample_weight_parts = [None] * len(data_parts)
 
-    # Arrange parts into pairs.  This enforces co-locality
-    parts = list(map(delayed, zip(data_parts, label_parts)))
+    # Arrange parts into triads.  This enforces co-locality
+    parts = list(map(delayed, zip(data_parts, label_parts, sample_weight_parts)))
     parts = client.compute(parts)  # Start computation in the background
     yield wait(parts)
 
@@ -185,15 +206,12 @@ def _train(
         if part.status == "error":
             yield part  # trigger error locally
 
-    if kwargs.get("eval_set"):
-        if any(
-            is_dask_collection(e)
-            for evals in kwargs.get("eval_set")
-            for e in evals
-        ):
-            raise TypeError(
-                "Evaluation set must not contain dask collections."
-            )
+    _has_dask_collections(
+        kwargs.get("eval_set", []), "Evaluation set must not contain dask collections."
+    )
+    _has_dask_collections(
+        kwargs.get("sample_weight_eval_set", []), "Sample weight evaluation set must not contain dask collections."
+    )
 
     # Because XGBoost-python doesn't yet allow iterative training, we need to
     # find the locations of all chunks and map them to particular Dask workers
@@ -246,6 +264,7 @@ def train(
     labels,
     dmatrix_kwargs={},
     evals_result=None,
+    sample_weight=None,
     **kwargs
 ):
     """ Train an XGBoost model on a Dask Cluster
@@ -287,6 +306,7 @@ def train(
         labels,
         dmatrix_kwargs,
         evals_result,
+        sample_weight,
         **kwargs
     )
 
@@ -460,6 +480,7 @@ class XGBClassifier(xgb.XGBClassifier):
         y=None,
         classes=None,
         eval_set=None,
+        sample_weight=None,
         sample_weight_eval_set=None,
         eval_metric=None,
         early_stopping_rounds=None,
@@ -476,6 +497,8 @@ class XGBClassifier(xgb.XGBClassifier):
             A list of (X, y) tuple pairs to use as validation sets, for which
             metrics will be computed.
             Validation metrics will help us track the performance of the model.
+        sample_weight : array_like, optional
+            instance weights
         sample_weight_eval_set : list, optional
             A list of the form [L_1, L_2, ..., L_n], where each L_i is a list
             of instance weights on the i-th validation set.
@@ -518,8 +541,7 @@ class XGBClassifier(xgb.XGBClassifier):
         -----
         This differs from the XGBoost version in three ways
 
-        1. The ``sample_weight`` and ``verbose`` fit kwargs are not
-          supported.
+        1. The ``verbose`` fit kwargs are not supported.
         2. The labels are not automatically label-encoded
         3. The ``classes_`` and ``n_classes_`` attributes are not learned
         """
@@ -558,7 +580,6 @@ class XGBClassifier(xgb.XGBClassifier):
 
         # TODO: auto label-encode y
         # that will require a dependency on dask-ml
-        # TODO: sample weight
 
         self.evals_result_ = {}
         self._Booster = train(
@@ -568,6 +589,8 @@ class XGBClassifier(xgb.XGBClassifier):
             y,
             num_boost_round=self.n_estimators,
             eval_set=eval_set,
+            sample_weight=sample_weight,
+            sample_weight_eval_set=sample_weight_eval_set,
             missing=self.missing,
             n_jobs=self.n_jobs,
             early_stopping_rounds=early_stopping_rounds,

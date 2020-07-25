@@ -210,7 +210,6 @@ def test_validation_weights_xgbclassifier(loop):  # noqa
             # now use weights for the test set
             np.random.seed(0)
             weights_test = np.random.choice([1, 2], len(X_test))
-            # weights_test = da.from_array(weights_test)
             clf.fit(
                 dX_train,
                 dy_train,
@@ -291,6 +290,46 @@ def test_regressor_with_early_stopping(loop):  # noqa
     b.fit(X, y, early_stopping_rounds=4, eval_metric="rmse", eval_set=[(X, y)])
     assert_eq(p1, b.predict(X))
     assert_eq(a.best_score, b.best_score)
+
+
+def test_validation_weights_xgbregressor(loop):  # noqa
+    from sklearn.datasets import make_regression
+    from sklearn.metrics import mean_squared_error
+
+    # prepare training and test data
+    X, y = make_regression(n_samples=2000, random_state=42)
+
+    with cluster() as (s, [a, b]):
+        with Client(s["address"], loop=loop):
+            X_train, X_test = X[:1600], X[1600:]
+            y_train, y_test = y[:1600], y[1600:]
+
+            dX_train = da.from_array(X_train)
+            dy_train = da.from_array(y_train)
+            dX_test = da.from_array(X_test)
+            dy_test = da.from_array(y_test)
+
+            reg = dxgb.XGBRegressor()
+
+            reg.fit(
+                dX_train, dy_train, #sample_weight=weights_train,
+            )
+            preds = reg.predict(dX_test)
+
+            rng = np.random.RandomState(0)
+            weights_train = 100.0 + rng.rand(len(X_train))
+            weights_train = da.from_array(weights_train)
+            weights_test = 100.0 + rng.rand(len(X_test))
+            
+            reg.fit(
+                dX_train, dy_train, sample_weight=weights_train,
+                sample_weight_eval_set=[weights_test],
+            )
+            preds2 = reg.predict(dX_test)
+
+    err = mean_squared_error(preds, y_test)
+    err2 = mean_squared_error(preds2, y_test)
+    assert err != err2
 
 
 @gen_cluster(client=True, timeout=None)

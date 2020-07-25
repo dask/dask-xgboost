@@ -280,6 +280,8 @@ def train(
     evals_result: dict, optional
         Stores the evaluation result history of all the items in the eval_set
         by mutating evals_result in place.
+    sample_weight : array_like, optional
+        instance weights
     **kwargs: Keywords to give to XGBoost train
 
     Examples
@@ -377,6 +379,7 @@ class XGBRegressor(xgb.XGBRegressor):
         X,
         y=None,
         eval_set=None,
+        sample_weight=None,
         sample_weight_eval_set=None,
         eval_metric=None,
         early_stopping_rounds=None,
@@ -401,6 +404,8 @@ class XGBRegressor(xgb.XGBRegressor):
             A list of (X, y) tuple pairs to use as validation sets, for which
             metrics will be computed.
             Validation metrics will help us track the performance of the model.
+        sample_weight : array_like, optional
+            instance weights
         sample_weight_eval_set : list, optional
             A list of the form [L_1, L_2, ..., L_n], where each L_i is a list
             of instance weights on the i-th validation set.
@@ -449,6 +454,8 @@ class XGBRegressor(xgb.XGBRegressor):
             y,
             num_boost_round=self.n_estimators,
             eval_set=eval_set,
+            sample_weight=sample_weight,
+            sample_weight_eval_set=sample_weight_eval_set,
             missing=self.missing,
             n_jobs=self.n_jobs,
             early_stopping_rounds=early_stopping_rounds,

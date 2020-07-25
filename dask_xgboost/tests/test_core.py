@@ -307,12 +307,11 @@ def test_validation_weights_xgbregressor(loop):  # noqa
             dX_train = da.from_array(X_train)
             dy_train = da.from_array(y_train)
             dX_test = da.from_array(X_test)
-            dy_test = da.from_array(y_test)
 
             reg = dxgb.XGBRegressor()
 
             reg.fit(
-                dX_train, dy_train, #sample_weight=weights_train,
+                dX_train, dy_train,  # sample_weight=weights_train,
             )
             preds = reg.predict(dX_test)
 
@@ -320,9 +319,11 @@ def test_validation_weights_xgbregressor(loop):  # noqa
             weights_train = 100.0 + rng.rand(len(X_train))
             weights_train = da.from_array(weights_train)
             weights_test = 100.0 + rng.rand(len(X_test))
-            
+
             reg.fit(
-                dX_train, dy_train, sample_weight=weights_train,
+                dX_train,
+                dy_train,
+                sample_weight=weights_train,
                 sample_weight_eval_set=[weights_test],
             )
             preds2 = reg.predict(dX_test)

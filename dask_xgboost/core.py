@@ -38,7 +38,7 @@ def parse_host_port(address):
 def start_tracker(host, n_workers):
     """ Start Rabit tracker """
     if host is None:
-        host = get_host_ip('auto')
+        host = get_host_ip("auto")
     env = {"DMLC_NUM_WORKER": n_workers}
     rabit = RabitTracker(hostIP=host, nslave=n_workers)
     env.update(rabit.slave_envs())
@@ -193,7 +193,9 @@ def _train(
     # Check that data, labels, and sample_weights are the same length
     lists = [data_parts, label_parts, sample_weight_parts]
     if len(set([len(l) for l in lists])) > 1:
-        raise ValueError('data, label, and sample_weight parts/chunks must have same length.')
+        raise ValueError(
+            "data, label, and sample_weight parts/chunks must have same length."
+        )
 
     # Arrange parts into triads.  This enforces co-locality
     parts = list(map(delayed, zip(data_parts, label_parts, sample_weight_parts)))
@@ -223,9 +225,7 @@ def _train(
     ncores = yield client.scheduler.ncores()  # Number of cores per worker
 
     # Start the XGBoost tracker on the Dask scheduler
-    env = yield client._run_on_scheduler(start_tracker,
-                                         None,
-                                         len(worker_map))
+    env = yield client._run_on_scheduler(start_tracker, None, len(worker_map))
 
     # Tell each worker to train on the chunks/parts that it has locally
     futures = [

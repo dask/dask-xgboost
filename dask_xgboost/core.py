@@ -16,11 +16,13 @@ from .tracker import RabitTracker, get_host_ip
 
 try:
     import sparse
-    import scipy.sparse as ss
 except ImportError:
     sparse = False
-    ss = False
 
+try:
+    import scipy.sparse as ss
+except ImportError:
+    ss = False
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +38,7 @@ def parse_host_port(address):
 def start_tracker(host, n_workers):
     """ Start Rabit tracker """
     if host is None:
-        host = get_host_ip('auto')
+        host = get_host_ip("auto")
     env = {"DMLC_NUM_WORKER": n_workers}
     rabit = RabitTracker(hostIP=host, nslave=n_workers)
     env.update(rabit.slave_envs())
@@ -54,7 +56,7 @@ def concat(L):
         return np.concatenate(L, axis=0)
     elif isinstance(L[0], (pd.DataFrame, pd.Series)):
         return pd.concat(L, axis=0)
-    elif ss and isinstance(L[0], ss.spmatrix):
+    elif ss and isinstance(L[0], ss.csr_matrix):
         return ss.vstack(L, format="csr")
     elif sparse and isinstance(L[0], sparse.SparseArray):
         return sparse.concatenate(L, axis=0)
@@ -86,14 +88,16 @@ def train_part(
     -------
     model if rank zero, None otherwise
     """
-    data, labels = zip(*list_of_parts)  # Prepare data
+    data, labels, sample_weight = zip(*list_of_parts)  # Prepare data
     data = concat(data)  # Concatenate many parts into one
     labels = concat(labels)
+    sample_weight = concat(sample_weight) if np.all(sample_weight) else None
+
     if dmatrix_kwargs is None:
         dmatrix_kwargs = {}
 
     dmatrix_kwargs["feature_names"] = getattr(data, "columns", None)
-    dtrain = xgb.DMatrix(data, labels, **dmatrix_kwargs)
+    dtrain = xgb.DMatrix(data, labels, weight=sample_weight, **dmatrix_kwargs)
 
     evals = _package_evals(
         eval_set,
@@ -123,30 +127,30 @@ def train_part(
     return result, evals_result
 
 
-def _package_evals(
-    eval_set, sample_weight_eval_set=None, missing=None, n_jobs=None
-):
+def _package_evals(eval_set, sample_weight_eval_set=None, missing=None, n_jobs=None):
     if eval_set is not None:
         if sample_weight_eval_set is None:
             sample_weight_eval_set = [None] * len(eval_set)
         evals = list(
             xgb.DMatrix(
-                data,
-                label=label,
-                missing=missing,
-                weight=weight,
-                nthread=n_jobs,
+                data, label=label, missing=missing, weight=weight, nthread=n_jobs,
             )
-            for ((data, label), weight) in zip(
-                eval_set, sample_weight_eval_set
-            )
+            for ((data, label), weight) in zip(eval_set, sample_weight_eval_set)
         )
-        evals = list(
-            zip(evals, ["validation_{}".format(i) for i in range(len(evals))])
-        )
+        evals = list(zip(evals, ["validation_{}".format(i) for i in range(len(evals))]))
     else:
         evals = ()
     return evals
+
+
+def _has_dask_collections(list_of_collections, message):
+    list_of_collections = list_of_collections or []
+    if any(
+        is_dask_collection(collection)
+        for collections in list_of_collections
+        for collection in collections
+    ):
+        raise TypeError(message)
 
 
 @gen.coroutine
@@ -157,6 +161,7 @@ def _train(
     labels,
     dmatrix_kwargs={},
     evals_result=None,
+    sample_weight=None,
     **kwargs
 ):
     """
@@ -175,9 +180,25 @@ def _train(
     if isinstance(label_parts, np.ndarray):
         assert label_parts.ndim == 1 or label_parts.shape[1] == 1
         label_parts = label_parts.flatten().tolist()
+    if sample_weight is not None:
+        sample_weight_parts = sample_weight.to_delayed()
+        if isinstance(sample_weight_parts, np.ndarray):
+            assert sample_weight_parts.ndim == 1 or sample_weight_parts.shape[1] == 1
+            sample_weight_parts = sample_weight_parts.flatten().tolist()
+    else:
+        # If sample_weight is None construct a list of Nones to keep
+        # the structure of parts consistent.
+        sample_weight_parts = [None] * len(data_parts)
 
-    # Arrange parts into pairs.  This enforces co-locality
-    parts = list(map(delayed, zip(data_parts, label_parts)))
+    # Check that data, labels, and sample_weights are the same length
+    lists = [data_parts, label_parts, sample_weight_parts]
+    if len(set([len(l) for l in lists])) > 1:
+        raise ValueError(
+            "data, label, and sample_weight parts/chunks must have same length."
+        )
+
+    # Arrange parts into triads.  This enforces co-locality
+    parts = list(map(delayed, zip(data_parts, label_parts, sample_weight_parts)))
     parts = client.compute(parts)  # Start computation in the background
     yield wait(parts)
 
@@ -185,22 +206,18 @@ def _train(
         if part.status == "error":
             yield part  # trigger error locally
 
-    if kwargs.get("eval_set"):
-        if any(
-            is_dask_collection(e)
-            for evals in kwargs.get("eval_set")
-            for e in evals
-        ):
-            raise TypeError(
-                "Evaluation set must not contain dask collections."
-            )
+    _has_dask_collections(
+        kwargs.get("eval_set", []), "Evaluation set must not contain dask collections."
+    )
+    _has_dask_collections(
+        kwargs.get("sample_weight_eval_set", []),
+        "Sample weight evaluation set must not contain dask collections.",
+    )
 
     # Because XGBoost-python doesn't yet allow iterative training, we need to
     # find the locations of all chunks and map them to particular Dask workers
     key_to_part_dict = dict([(part.key, part) for part in parts])
-    who_has = yield client.scheduler.who_has(
-        keys=[part.key for part in parts]
-    )
+    who_has = yield client.scheduler.who_has(keys=[part.key for part in parts])
     worker_map = defaultdict(list)
     for key, workers in who_has.items():
         worker_map[first(workers)].append(key_to_part_dict[key])
@@ -208,9 +225,7 @@ def _train(
     ncores = yield client.scheduler.ncores()  # Number of cores per worker
 
     # Start the XGBoost tracker on the Dask scheduler
-    env = yield client._run_on_scheduler(start_tracker,
-                                         None,
-                                         len(worker_map))
+    env = yield client._run_on_scheduler(start_tracker, None, len(worker_map))
 
     # Tell each worker to train on the chunks/parts that it has locally
     futures = [
@@ -246,6 +261,7 @@ def train(
     labels,
     dmatrix_kwargs={},
     evals_result=None,
+    sample_weight=None,
     **kwargs
 ):
     """ Train an XGBoost model on a Dask Cluster
@@ -264,6 +280,8 @@ def train(
     evals_result: dict, optional
         Stores the evaluation result history of all the items in the eval_set
         by mutating evals_result in place.
+    sample_weight : array_like, optional
+        instance weights
     **kwargs: Keywords to give to XGBoost train
 
     Examples
@@ -287,6 +305,7 @@ def train(
         labels,
         dmatrix_kwargs,
         evals_result,
+        sample_weight,
         **kwargs
     )
 
@@ -341,14 +360,10 @@ def predict(client, model, data):
         num_class = int(num_class)
 
         if num_class > 2:
-            kwargs = dict(
-                drop_axis=None, chunks=(data.chunks[0], (num_class,))
-            )
+            kwargs = dict(drop_axis=None, chunks=(data.chunks[0], (num_class,)))
         else:
             kwargs = dict(drop_axis=1)
-        result = data.map_blocks(
-            _predict_part, model=model, dtype=np.float32, **kwargs
-        )
+        result = data.map_blocks(_predict_part, model=model, dtype=np.float32, **kwargs)
     else:
         model = model.result()  # Future to concrete
         if not isinstance(data, xgb.DMatrix):
@@ -364,6 +379,7 @@ class XGBRegressor(xgb.XGBRegressor):
         X,
         y=None,
         eval_set=None,
+        sample_weight=None,
         sample_weight_eval_set=None,
         eval_metric=None,
         early_stopping_rounds=None,
@@ -388,6 +404,8 @@ class XGBRegressor(xgb.XGBRegressor):
             A list of (X, y) tuple pairs to use as validation sets, for which
             metrics will be computed.
             Validation metrics will help us track the performance of the model.
+        sample_weight : array_like, optional
+            instance weights
         sample_weight_eval_set : list, optional
             A list of the form [L_1, L_2, ..., L_n], where each L_i is a list
             of instance weights on the i-th validation set.
@@ -436,6 +454,8 @@ class XGBRegressor(xgb.XGBRegressor):
             y,
             num_boost_round=self.n_estimators,
             eval_set=eval_set,
+            sample_weight=sample_weight,
+            sample_weight_eval_set=sample_weight_eval_set,
             missing=self.missing,
             n_jobs=self.n_jobs,
             early_stopping_rounds=early_stopping_rounds,
@@ -460,6 +480,7 @@ class XGBClassifier(xgb.XGBClassifier):
         y=None,
         classes=None,
         eval_set=None,
+        sample_weight=None,
         sample_weight_eval_set=None,
         eval_metric=None,
         early_stopping_rounds=None,
@@ -476,6 +497,8 @@ class XGBClassifier(xgb.XGBClassifier):
             A list of (X, y) tuple pairs to use as validation sets, for which
             metrics will be computed.
             Validation metrics will help us track the performance of the model.
+        sample_weight : array_like, optional
+            instance weights
         sample_weight_eval_set : list, optional
             A list of the form [L_1, L_2, ..., L_n], where each L_i is a list
             of instance weights on the i-th validation set.
@@ -518,8 +541,7 @@ class XGBClassifier(xgb.XGBClassifier):
         -----
         This differs from the XGBoost version in three ways
 
-        1. The ``sample_weight`` and ``verbose`` fit kwargs are not
-          supported.
+        1. The ``verbose`` fit kwargs are not supported.
         2. The labels are not automatically label-encoded
         3. The ``classes_`` and ``n_classes_`` attributes are not learned
         """
@@ -558,7 +580,6 @@ class XGBClassifier(xgb.XGBClassifier):
 
         # TODO: auto label-encode y
         # that will require a dependency on dask-ml
-        # TODO: sample weight
 
         self.evals_result_ = {}
         self._Booster = train(
@@ -568,6 +589,8 @@ class XGBClassifier(xgb.XGBClassifier):
             y,
             num_boost_round=self.n_estimators,
             eval_set=eval_set,
+            sample_weight=sample_weight,
+            sample_weight_eval_set=sample_weight_eval_set,
             missing=self.missing,
             n_jobs=self.n_jobs,
             early_stopping_rounds=early_stopping_rounds,
@@ -592,8 +615,6 @@ class XGBClassifier(xgb.XGBClassifier):
     def predict_proba(self, data, ntree_limit=None):
         client = default_client()
         if ntree_limit is not None:
-            raise NotImplementedError(
-                "'ntree_limit' is not currently " "supported."
-            )
+            raise NotImplementedError("'ntree_limit' is not currently " "supported.")
         class_probs = predict(client, self._Booster, data)
         return class_probs

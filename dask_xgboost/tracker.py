@@ -83,10 +83,7 @@ class SlaveEntry(object):
         self.sock = slave
         self.host = get_some_ip(s_addr[0])
         magic = slave.recvint()
-        assert magic == kMagic, "invalid magic number=%d from %s" % (
-            magic,
-            self.host,
-        )
+        assert magic == kMagic, "invalid magic number=%d from %s" % (magic, self.host,)
         slave.sendint(kMagic)
         self.rank = slave.recvint()
         self.world_size = slave.recvint()
@@ -169,7 +166,7 @@ class RabitTracker(object):
         sock = socket.socket(get_family(hostIP), socket.SOCK_STREAM)
         for port in range(port, port_end):
             try:
-                logging.info('Binding Rabit tracker %s:%d', hostIP, port)
+                logging.info("Binding Rabit tracker %s:%d", hostIP, port)
                 sock.bind((hostIP, port))
                 self.port = port
                 break
@@ -332,9 +329,7 @@ class RabitTracker(object):
                         rank = todo_nodes.pop(0)
                         if s.jobid != "NULL":
                             job_map[s.jobid] = rank
-                        s.assign_rank(
-                            rank, wait_conn, tree_map, parent_map, ring_map
-                        )
+                        s.assign_rank(rank, wait_conn, tree_map, parent_map, ring_map)
                         if s.wait_accept > 0:
                             wait_conn[rank] = s
                         logging.debug(
@@ -344,9 +339,7 @@ class RabitTracker(object):
                             s.rank,
                         )
                 if len(todo_nodes) == 0:
-                    logging.info(
-                        "@tracker All of %d nodes getting started", nslave
-                    )
+                    logging.info("@tracker All of %d nodes getting started", nslave)
                     self.start_time = time.time()
             else:
                 s.assign_rank(rank, wait_conn, tree_map, parent_map, ring_map)
@@ -404,9 +397,7 @@ class PSTracker(object):
         for k, v in envs.items():
             env[k] = str(v)
         self.thread = Thread(
-            target=(
-                lambda: subprocess.check_call(self.cmd, env=env, shell=True)
-            ),
+            target=(lambda: subprocess.check_call(self.cmd, env=env, shell=True)),
             args=(),
         )
         self.thread.setDaemon(True)
@@ -440,8 +431,7 @@ def get_host_ip(hostIP=None):
             hostIP = socket.gethostbyname(socket.getfqdn())
         except gaierror:
             logging.warn(
-                "gethostbyname(socket.getfqdn()) failed... trying on "
-                "hostname()"
+                "gethostbyname(socket.getfqdn()) failed... trying on " "hostname()"
             )
             hostIP = socket.gethostbyname(socket.gethostname())
         if hostIP.startswith("127."):
@@ -485,9 +475,7 @@ def start_rabit_tracker(args):
         "DMLC_NUM_WORKER": args.num_workers,
         "DMLC_NUM_SERVER": args.num_servers,
     }
-    rabit = RabitTracker(
-        hostIP=get_host_ip(args.host_ip), nslave=args.num_workers
-    )
+    rabit = RabitTracker(hostIP=get_host_ip(args.host_ip), nslave=args.num_workers)
     envs.update(rabit.slave_envs())
     rabit.start(args.num_workers)
     sys.stdout.write("DMLC_TRACKER_ENV_START\n")
@@ -512,8 +500,7 @@ def main():
         "--num-servers",
         default=0,
         type=int,
-        help="Number of server process to be launched. Only "
-        "used in PS jobs.",
+        help="Number of server process to be launched. Only " "used in PS jobs.",
     )
     parser.add_argument(
         "--host-ip",
@@ -546,9 +533,7 @@ def main():
     if args.num_servers == 0:
         start_rabit_tracker(args)
     else:
-        raise RuntimeError(
-            "Do not yet support start ps tracker in standalone " "mode."
-        )
+        raise RuntimeError("Do not yet support start ps tracker in standalone " "mode.")
 
 
 if __name__ == "__main__":

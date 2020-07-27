@@ -24,10 +24,7 @@ distributed.comm.utils._offload_executor = ThreadPoolExecutor(max_workers=2)
 
 
 df = pd.DataFrame(
-    {
-        "x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-        "y": [1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
-    }
+    {"x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "y": [1, 0, 1, 0, 1, 0, 1, 0, 1, 0],}
 )
 labels = pd.Series([1, 0, 1, 0, 1, 0, 1, 1, 1, 1])
 
@@ -53,10 +50,19 @@ def test_classifier(loop):  # noqa
 
     b = xgb.XGBClassifier()
     b.fit(X, y)
-    np.testing.assert_array_almost_equal(
-        a.feature_importances_, b.feature_importances_
-    )
+    np.testing.assert_array_almost_equal(a.feature_importances_, b.feature_importances_)
     assert_eq(p1, b.predict(X))
+
+
+def test_classifier_different_chunks(loop):  # noqa
+    with cluster() as (s, [a, b]):
+        with Client(s["address"], loop=loop):
+            a = dxgb.XGBClassifier()
+            X2 = da.from_array(X, 5)
+            y2 = da.from_array(y, 4)
+
+            with pytest.raises(ValueError):
+                a.fit(X2, y2)
 
 
 def test_multiclass_classifier(loop):  # noqa
@@ -160,6 +166,66 @@ def test_package_evals():
     assert len(evals) == 1
 
 
+def test_validation_weights_xgbclassifier(loop):  # noqa
+    from sklearn.datasets import make_hastie_10_2
+
+    # prepare training and test data
+    X, y = make_hastie_10_2(n_samples=2000, random_state=42)
+    labels, y = np.unique(y, return_inverse=True)
+
+    param_dist = {
+        "objective": "binary:logistic",
+        "n_estimators": 2,
+        "random_state": 123,
+    }
+
+    with cluster() as (s, [a, b]):
+        with Client(s["address"], loop=loop):
+            X_train, X_test = X[:1600], X[1600:]
+            y_train, y_test = y[:1600], y[1600:]
+
+            dX_train = da.from_array(X_train)
+            dy_train = da.from_array(y_train)
+
+            # instantiate model
+            clf = dxgb.XGBClassifier(**param_dist)
+
+            # train it using instance weights only in the training set
+            weights_train = np.random.choice([1, 2], len(X_train))
+            weights_train = da.from_array(weights_train)
+            clf.fit(
+                dX_train,
+                dy_train,
+                sample_weight=weights_train,
+                eval_set=[(X_test, y_test)],
+                eval_metric="logloss",
+            )
+
+            # evaluate logloss metric on test set *without* using weights
+            evals_result_without_weights = clf.evals_result()
+            logloss_without_weights = evals_result_without_weights["validation_0"][
+                "logloss"
+            ]
+
+            # now use weights for the test set
+            np.random.seed(0)
+            weights_test = np.random.choice([1, 2], len(X_test))
+            clf.fit(
+                dX_train,
+                dy_train,
+                sample_weight=weights_train,
+                eval_set=[(X_test, y_test)],
+                sample_weight_eval_set=[weights_test],
+                eval_metric="logloss",
+            )
+            evals_result_with_weights = clf.evals_result()
+            logloss_with_weights = evals_result_with_weights["validation_0"]["logloss"]
+
+    # check that the logloss in the test set is actually different
+    # when using weights than when not using them
+    assert all((logloss_with_weights[i] != logloss_without_weights[i] for i in [0, 1]))
+
+
 @pytest.mark.parametrize("kind", ["array", "dataframe"])
 def test_classifier_multi(kind, loop):  # noqa: F811
 
@@ -216,20 +282,55 @@ def test_regressor_with_early_stopping(loop):  # noqa
             X2 = da.from_array(X, 5)
             y2 = da.from_array(y, 5)
             a.fit(
-                X2,
-                y2,
-                early_stopping_rounds=4,
-                eval_metric="rmse",
-                eval_set=[(X, y)],
+                X2, y2, early_stopping_rounds=4, eval_metric="rmse", eval_set=[(X, y)],
             )
             p1 = a.predict(X2)
 
     b = xgb.XGBRegressor()
-    b.fit(
-        X, y, early_stopping_rounds=4, eval_metric="rmse", eval_set=[(X, y)]
-    )
+    b.fit(X, y, early_stopping_rounds=4, eval_metric="rmse", eval_set=[(X, y)])
     assert_eq(p1, b.predict(X))
     assert_eq(a.best_score, b.best_score)
+
+
+def test_validation_weights_xgbregressor(loop):  # noqa
+    from sklearn.datasets import make_regression
+    from sklearn.metrics import mean_squared_error
+
+    # prepare training and test data
+    X, y = make_regression(n_samples=2000, random_state=42)
+
+    with cluster() as (s, [a, b]):
+        with Client(s["address"], loop=loop):
+            X_train, X_test = X[:1600], X[1600:]
+            y_train, y_test = y[:1600], y[1600:]
+
+            dX_train = da.from_array(X_train)
+            dy_train = da.from_array(y_train)
+            dX_test = da.from_array(X_test)
+
+            reg = dxgb.XGBRegressor()
+
+            reg.fit(
+                dX_train, dy_train,  # sample_weight=weights_train,
+            )
+            preds = reg.predict(dX_test)
+
+            rng = np.random.RandomState(0)
+            weights_train = 100.0 + rng.rand(len(X_train))
+            weights_train = da.from_array(weights_train)
+            weights_test = 100.0 + rng.rand(len(X_test))
+
+            reg.fit(
+                dX_train,
+                dy_train,
+                sample_weight=weights_train,
+                sample_weight_eval_set=[weights_test],
+            )
+            preds2 = reg.predict(dX_test)
+
+    err = mean_squared_error(preds, y_test)
+    err2 = mean_squared_error(preds2, y_test)
+    assert err != err2
 
 
 @gen_cluster(client=True, timeout=None)
@@ -439,6 +540,20 @@ def test_eval_set_dask_collection_exception(c, s, a, b):
     with pytest.raises(TypeError) as info:
         yield dxgb.train(c, param, ddf, dlabels, eval_set=[(X2, y2)])
 
-    assert "Evaluation set must not contain dask collections." in str(
+    assert "Evaluation set must not contain dask collections." in str(info.value)
+
+
+@gen_cluster(client=True, timeout=None)
+def test_sample_weight_eval_set_dask_collection_exception(c, s, a, b):
+    ddf = dd.from_pandas(df, npartitions=4)
+    dlabels = dd.from_pandas(labels, npartitions=4)
+
+    X2 = da.from_array(X, 5)
+    y2 = da.from_array(y, 5)
+
+    with pytest.raises(TypeError) as info:
+        yield dxgb.train(c, param, ddf, dlabels, sample_weight_eval_set=[(X2, y2)])
+
+    assert "Sample weight evaluation set must not contain dask collections." in str(
         info.value
     )

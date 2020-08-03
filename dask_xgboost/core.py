@@ -609,7 +609,7 @@ class XGBClassifier(xgb.XGBClassifier):
         if class_probs.ndim > 1:
             cidx = da.argmax(class_probs, axis=1)
         else:
-            cidx = (class_probs >= 0.5).astype(np.int64)
+            cidx = (class_probs > 0.5).astype(np.int64)
         return cidx
 
     def predict_proba(self, data, ntree_limit=None):

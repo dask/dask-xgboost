@@ -603,13 +603,13 @@ class XGBClassifier(xgb.XGBClassifier):
             self.best_ntree_limit = self._Booster.best_ntree_limit
         return self
 
-    def predict(self, X, threshold=0.5):
+    def predict(self, X):
         client = default_client()
         class_probs = predict(client, self._Booster, X)
         if class_probs.ndim > 1:
             cidx = da.argmax(class_probs, axis=1)
         else:
-            cidx = (class_probs >= threshold).astype(np.int64)
+            cidx = (class_probs >= 0.5).astype(np.int64)
         return cidx
 
     def predict_proba(self, data, ntree_limit=None):

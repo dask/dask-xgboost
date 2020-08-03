@@ -557,18 +557,3 @@ def test_sample_weight_eval_set_dask_collection_exception(c, s, a, b):
     assert "Sample weight evaluation set must not contain dask collections." in str(
         info.value
     )
-
-def test_sigmoid_predict(loop):
-    y_1s = np.array([1]*len(y))
-    with cluster() as (s, [a, b]):
-        with Client(s["address"], loop=loop):
-            a, b = dxgb.XGBClassifier(), dxgb.XGBClassifier()
-            X2 = da.from_array(X, 5)
-            y2, y2_1s = da.from_array(y, 5), da.from_array(y_1s, 5)
-            a.fit(X2, y2)
-            b.fit(X2, y2_1s)
-            p1_prob, p1 = a.predict_proba(X2), a.predict(X2,0.7)
-            p2 = b.predict(X2) # Model should learn to predict all 1's
-
-    assert_eq(np.where(p1_prob>0.7,1,0), p1)
-    assert_eq(p2, y2_1s)

@@ -19,7 +19,7 @@ for r in requires:
 
 setup(
     name="dask-xgboost",
-    version="0.1.10",
+    version="0.1.11",
     description="Interactions between Dask and XGBoost",
     maintainer="Matthew Rocklin",
     maintainer_email="mrocklin@continuum.io",

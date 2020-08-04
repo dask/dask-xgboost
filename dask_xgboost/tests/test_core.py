@@ -40,11 +40,15 @@ y = labels.values
 
 
 def test_classifier(loop):  # noqa
+    digits = load_digits(2)
+    X = digits["data"]
+    y = digits["target"]
+
     with cluster() as (s, [a, b]):
         with Client(s["address"], loop=loop):
             a = dxgb.XGBClassifier()
-            X2 = da.from_array(X, 5)
-            y2 = da.from_array(y, 5)
+            X2 = da.from_array(X)
+            y2 = da.from_array(y)
             a.fit(X2, y2)
             p1 = a.predict(X2)
 

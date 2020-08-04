@@ -3,3 +3,5 @@
 *.egg-info
 docs/build
 dask-worker-space
+build
+dist

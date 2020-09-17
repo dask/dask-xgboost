@@ -224,8 +224,12 @@ def _train(
 
     ncores = yield client.scheduler.ncores()  # Number of cores per worker
 
+    try:
+        host, _ = parse_host_port(client.scheduler.address)
+    except:
+        host = None
     # Start the XGBoost tracker on the Dask scheduler
-    env = yield client._run_on_scheduler(start_tracker, None, len(worker_map))
+    env = yield client._run_on_scheduler(start_tracker, host, len(worker_map))
 
     # Tell each worker to train on the chunks/parts that it has locally
     futures = [

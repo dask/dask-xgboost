@@ -230,7 +230,9 @@ def _train(
 
     default_host, _ = parse_host_port(client.scheduler.address)
     # Start the XGBoost tracker on the Dask scheduler
-    env = yield client._run_on_scheduler(start_tracker, None, len(worker_map), default_host=default_host)
+    env = yield client._run_on_scheduler(
+        start_tracker, None, len(worker_map), default_host=default_host
+    )
 
     # Tell each worker to train on the chunks/parts that it has locally
     futures = [

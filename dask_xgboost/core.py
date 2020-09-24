@@ -1,4 +1,5 @@
 import logging
+import socket
 from collections import defaultdict
 from threading import Thread
 
@@ -35,10 +36,13 @@ def parse_host_port(address):
     return host, port
 
 
-def start_tracker(host, n_workers):
+def start_tracker(host, n_workers, default_host=None):
     """ Start Rabit tracker """
     if host is None:
-        host = get_host_ip("auto")
+        try:
+            host = get_host_ip("auto")
+        except socket.gaierror:
+            host = default_host
     env = {"DMLC_NUM_WORKER": n_workers}
     rabit = RabitTracker(hostIP=host, nslave=n_workers)
     env.update(rabit.slave_envs())
@@ -224,9 +228,9 @@ def _train(
 
     ncores = yield client.scheduler.ncores()  # Number of cores per worker
 
-    host, _ = parse_host_port(client.scheduler.address)
+    default_host, _ = parse_host_port(client.scheduler.address)
     # Start the XGBoost tracker on the Dask scheduler
-    env = yield client._run_on_scheduler(start_tracker, host, len(worker_map))
+    env = yield client._run_on_scheduler(start_tracker, None, len(worker_map), default_host=default_host)
 
     # Tell each worker to train on the chunks/parts that it has locally
     futures = [

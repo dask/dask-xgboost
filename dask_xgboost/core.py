@@ -43,7 +43,7 @@ def start_tracker(host, n_workers, default_host=None):
             host = get_host_ip("auto")
         except socket.gaierror:
             host = default_host
-            
+
     env = {"DMLC_NUM_WORKER": n_workers}
     rabit = RabitTracker(hostIP=host, nslave=n_workers)
     env.update(rabit.slave_envs())

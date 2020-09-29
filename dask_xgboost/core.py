@@ -42,7 +42,10 @@ def start_tracker(host, n_workers, default_host=None):
         try:
             host = get_host_ip("auto")
         except socket.gaierror:
-            host = default_host
+            if default_host is not None:
+                host = default_host
+            else:
+                raise
 
     env = {"DMLC_NUM_WORKER": n_workers}
     rabit = RabitTracker(hostIP=host, nslave=n_workers)

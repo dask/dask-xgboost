@@ -3,12 +3,20 @@ Dask-XGBoost
 
 Distributed training with XGBoost and Dask.distributed
 
-This repository enables you to perform distributed training with XGBoost on
-Dask.array and Dask.dataframe collections.
+This repository offers a legacy option to perform distributed training
+with XGBoost on Dask.array and Dask.dataframe collections.
 
 ::
 
    pip install dask-xgboost
+
+Please note that XGBoost now includes a Dask API as part of its official Python package.
+That API is independent of `dask-xgboost` and is now the recommended way to use Dask
+adn XGBoost together. See
+`the xgb.dask documentation here https://xgboost.readthedocs.io/en/latest/tutorials/dask.html`
+for more details on the new API.
+
+
 
 Example
 -------

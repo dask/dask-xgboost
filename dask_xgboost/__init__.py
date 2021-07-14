@@ -2,7 +2,7 @@ import warnings
 
 from .core import XGBClassifier, XGBRegressor, _train, predict, train  # noqa
 
-__version__ = "0.1.11"
+__version__ = "0.2.0"
 
 warnings.warn(
    "Dask-XGBoost has been deprecated and is no longer maintained. The functionality "
